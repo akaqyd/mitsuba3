@@ -15,6 +15,11 @@ add_plugin(shapegroup  shapegroup.cpp)
 add_plugin(instance    instance.cpp)
 add_plugin(merge       merge.cpp)
 
+# Qiyuan
+add_plugin(bspline     bspline.cpp)
+add_plugin(linearcurve linear_curve.cpp)
+
+
 if (MI_ENABLE_EMBREE)
     target_link_libraries(sphere   PRIVATE embree)
     target_link_libraries(instance PRIVATE embree)

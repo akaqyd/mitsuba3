@@ -6,6 +6,9 @@
 /.vscode
 /.vs
 
+# CLion
+/.idea
+
 # Jupyter
 /.ipynb_checkpoints
 
