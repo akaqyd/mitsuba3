@@ -34,6 +34,9 @@ using OptixTask              = void*;
 #define OPTIX_BUILD_INPUT_TYPE_CUSTOM_PRIMITIVES 0x2142
 #define OPTIX_BUILD_INPUT_TYPE_INSTANCES         0x2143
 #define OPTIX_BUILD_OPERATION_BUILD              0x2161
+// Qiyuan: SP curve
+#define OPTIX_BUILD_INPUT_TYPE_CURVES            0x2145
+
 
 #define OPTIX_GEOMETRY_FLAG_NONE           0
 #define OPTIX_GEOMETRY_FLAG_DISABLE_ANYHIT 1
@@ -48,6 +51,9 @@ using OptixTask              = void*;
 #define OPTIX_COMPILE_OPTIMIZATION_LEVEL_0       0x2340
 #define OPTIX_COMPILE_DEBUG_LEVEL_NONE           0x2350
 #define OPTIX_COMPILE_DEBUG_LEVEL_MINIMAL        0x2351
+
+// for curves
+#define OPTIX_BUILD_FLAG_ALLOW_RANDOM_VERTEX_ACCESS 1u << 4
 
 #define OPTIX_BUILD_FLAG_ALLOW_COMPACTION  2
 #define OPTIX_BUILD_FLAG_PREFER_FAST_TRACE 4
@@ -65,6 +71,9 @@ using OptixTask              = void*;
 
 #define OPTIX_PRIMITIVE_TYPE_FLAGS_CUSTOM   (1 << 0)
 #define OPTIX_PRIMITIVE_TYPE_FLAGS_TRIANGLE (1 << 31)
+// for curves
+#define OPTIX_PRIMITIVE_TYPE_FLAGS_ROUND_CUBIC_BSPLINE (1 << 2)
+#define OPTIX_PRIMITIVE_TYPE_FLAGS_ROUND_LINEAR        (1 << 3)
 
 #define OPTIX_PROGRAM_GROUP_KIND_MISS      0x2422
 #define OPTIX_PROGRAM_GROUP_KIND_HITGROUP  0x2424
@@ -137,12 +146,93 @@ struct OptixBuildInputInstanceArray {
     unsigned int numInstances;
 };
 
+typedef enum OptixPrimitiveType
+{
+    /// Custom primitive.
+    OPTIX_PRIMITIVE_TYPE_CUSTOM                        = 0x2500,
+    /// B-spline curve of degree 2 with circular cross-section.
+    OPTIX_PRIMITIVE_TYPE_ROUND_QUADRATIC_BSPLINE       = 0x2501,
+    /// B-spline curve of degree 3 with circular cross-section.
+    OPTIX_PRIMITIVE_TYPE_ROUND_CUBIC_BSPLINE           = 0x2502,
+    /// Piecewise linear curve with circular cross-section.
+    OPTIX_PRIMITIVE_TYPE_ROUND_LINEAR                  = 0x2503,
+    /// Triangle.
+    OPTIX_PRIMITIVE_TYPE_TRIANGLE                      = 0x2531,
+} OptixPrimitiveType;
+
+/// Curve end cap types, for non-linear curves
+///
+typedef enum OptixCurveEndcapFlags
+{
+    /// Default end caps. Round end caps for linear, no end caps for quadratic/cubic.
+    OPTIX_CURVE_ENDCAP_DEFAULT                        = 0,
+    /// Flat end caps at both ends of quadratic/cubic curve segments. Not valid for linear.
+    OPTIX_CURVE_ENDCAP_ON                             = 1 << 0,
+} OptixCurveEndcapFlags;
+
+
+typedef struct OptixBuildInputCurveArray
+{
+    /// Curve degree and basis
+    /// \see #OptixPrimitiveType
+    OptixPrimitiveType curveType;
+    /// Number of primitives. Each primitive is a polynomial curve segment.
+    unsigned int numPrimitives;
+
+    /// Pointer to host array of device pointers, one per motion step. Host array size must match number of
+    /// motion keys as set in #OptixMotionOptions (or an array of size 1 if OptixMotionOptions::numKeys is set
+    /// to 1). Each per-motion-key device pointer must point to an array of floats (the vertices of the
+    /// curves).
+    const CUdeviceptr* vertexBuffers;
+    /// Number of vertices in each buffer in vertexBuffers.
+    unsigned int numVertices;
+    /// Stride between vertices. If set to zero, vertices are assumed to be tightly
+    /// packed and stride is sizeof( float3 ).
+    unsigned int vertexStrideInBytes;
+
+    /// Parallel to vertexBuffers: a device pointer per motion step, each with numVertices float values,
+    /// specifying the curve width (radius) corresponding to each vertex.
+    const CUdeviceptr* widthBuffers;
+    /// Stride between widths. If set to zero, widths are assumed to be tightly
+    /// packed and stride is sizeof( float ).
+    unsigned int widthStrideInBytes;
+
+    /// Reserved for future use.
+    const CUdeviceptr* normalBuffers;
+    /// Reserved for future use.
+    unsigned int normalStrideInBytes;
+
+    /// Device pointer to array of unsigned ints, one per curve segment.
+    /// This buffer is required (unlike for OptixBuildInputTriangleArray).
+    /// Each index is the start of degree+1 consecutive vertices in vertexBuffers,
+    /// and corresponding widths in widthBuffers and normals in normalBuffers.
+    /// These define a single segment. Size of array is numPrimitives.
+    CUdeviceptr indexBuffer;
+    /// Stride between indices. If set to zero, indices are assumed to be tightly
+    /// packed and stride is sizeof( unsigned int ).
+    unsigned int indexStrideInBytes;
+
+    /// Combination of OptixGeometryFlags describing the
+    /// primitive behavior.
+    unsigned int flag;
+
+    /// Primitive index bias, applied in optixGetPrimitiveIndex().
+    /// Sum of primitiveIndexOffset and number of primitives must not overflow 32bits.
+    unsigned int primitiveIndexOffset;
+
+    unsigned int endcapFlags;
+
+} OptixBuildInputCurveArray;
+
+
 struct OptixBuildInput {
     OptixBuildInputType type;
     union {
         OptixBuildInputTriangleArray triangleArray;
         OptixBuildInputCustomPrimitiveArray customPrimitiveArray;
         OptixBuildInputInstanceArray instanceArray;
+        /// Qiyuan: Curve inputs.
+        OptixBuildInputCurveArray curveArray;
         char pad[1024];
     };
 };

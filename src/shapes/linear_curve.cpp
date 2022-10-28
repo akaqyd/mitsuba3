@@ -17,7 +17,6 @@
 
 #if defined(MI_ENABLE_CUDA)
 // TODO: optix support
-//#include "optix/sphere.cuh"
 #endif
 
 NAMESPACE_BEGIN(mitsuba)

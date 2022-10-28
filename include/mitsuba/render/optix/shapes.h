@@ -8,6 +8,7 @@
 #include "mesh.cuh"
 #include "rectangle.cuh"
 #include "sphere.cuh"
+#include "bspline.cuh"
 #else
 
 #include <drjit-core/optix.h>
@@ -16,10 +17,11 @@
 #include <mitsuba/render/optix_api.h>
 #include <mitsuba/render/shape.h>
 
+
 NAMESPACE_BEGIN(mitsuba)
 /// List of the custom shapes supported by OptiX
 static std::string CUSTOM_OPTIX_SHAPE_NAMES[] = {
-    "Disk", "Rectangle", "Sphere", "Cylinder",
+    "Disk", "Rectangle", "Sphere", "Cylinder", "BSpline",
 };
 static constexpr size_t CUSTOM_OPTIX_SHAPE_COUNT = std::size(CUSTOM_OPTIX_SHAPE_NAMES);
 
@@ -91,7 +93,9 @@ void build_gas(const OptixDeviceContext &context,
 
         OptixAccelBuildOptions accel_options = {};
         accel_options.buildFlags = OPTIX_BUILD_FLAG_ALLOW_COMPACTION |
-                                   OPTIX_BUILD_FLAG_PREFER_FAST_TRACE;
+                                   OPTIX_BUILD_FLAG_PREFER_FAST_TRACE |
+                                   OPTIX_BUILD_FLAG_ALLOW_RANDOM_VERTEX_ACCESS;     // for curves
+
         accel_options.operation  = OPTIX_BUILD_OPERATION_BUILD;
         accel_options.motionOptions.numKeys = 0;
         if (handle.buffer) {
@@ -128,6 +132,9 @@ void build_gas(const OptixDeviceContext &context,
         OptixAccelEmitDesc emit_property = {};
         emit_property.type   = OPTIX_PROPERTY_TYPE_COMPACTED_SIZE;
         emit_property.result = (CUdeviceptr)((char*)output_buffer + buffer_sizes.outputSizeInBytes);
+
+        Log(Debug, "OptiXAccelBufferSizes  tempSizeInBytes:%d outputSizeInBytes:%d tempUpdateSizeInBytes:%d",
+                buffer_sizes.tempSizeInBytes, buffer_sizes.outputSizeInBytes, buffer_sizes.tempUpdateSizeInBytes);
 
         OptixTraversableHandle accel;
         jit_optix_check(optixAccelBuild(

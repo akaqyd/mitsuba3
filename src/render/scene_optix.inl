@@ -115,7 +115,9 @@ size_t init_optix_config(bool has_meshes, bool has_others, bool has_instances) {
         if (has_meshes)
             prim_flags |= OPTIX_PRIMITIVE_TYPE_FLAGS_TRIANGLE;
         if (has_others)
-            prim_flags |= OPTIX_PRIMITIVE_TYPE_FLAGS_CUSTOM;
+            prim_flags |= OPTIX_PRIMITIVE_TYPE_FLAGS_CUSTOM |
+                          OPTIX_PRIMITIVE_TYPE_FLAGS_ROUND_CUBIC_BSPLINE |
+                          OPTIX_PRIMITIVE_TYPE_FLAGS_ROUND_LINEAR;
 
         config.pipeline_compile_options.usesPrimitiveTypeFlags = prim_flags;
 

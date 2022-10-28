@@ -16,8 +16,7 @@
 #endif
 
 #if defined(MI_ENABLE_CUDA)
-// TODO: optix support
-//#include "optix/sphere.cuh"
+    #include "optix/bspline.cuh"
 #endif
 
 NAMESPACE_BEGIN(mitsuba)
@@ -141,6 +140,9 @@ public:
     using InputVector3f = Vector<InputFloat, 3>;
     using FloatStorage = DynamicBuffer<dr::replace_scalar_t<Float, InputFloat>>;
 
+    using UInt32Storage = DynamicBuffer<UInt32>;
+
+
     BSpline(const Properties &props) : Base(props) {
 
         auto fs = Thread::thread()->file_resolver();
@@ -160,7 +162,7 @@ public:
         ref<MemoryMappedFile> mmap = new MemoryMappedFile(file_path);
         ScopedPhase phase(ProfilerPhase::LoadGeometry);
 
-        // temporary buggers for vertices and per-vertex radius
+        // temporary buffer for vertices and per-vertex radius
         std::vector<InputVector3f> vertices;
         std::vector<InputFloat> radius;
         size_t vertex_guess = mmap->size() / 100;
@@ -224,6 +226,7 @@ public:
         }
 
         m_control_point_count = vertices.size();
+        m_segment_count = m_control_point_count - 3;
         if (unlikely(m_control_point_count < 4))
             fail("bspline must have at least four control points");
 
@@ -234,7 +237,11 @@ public:
 
         // store the data from the previous temporary buffer
         std::unique_ptr<float[]> vertex_positions_radius(new float[m_control_point_count * 4]);
-        std::unique_ptr<ScalarIndex[]> indices(new ScalarIndex[m_control_point_count - 3]);
+        std::unique_ptr<ScalarIndex[]> indices(new ScalarIndex[m_segment_count]);
+
+        // for OptiX
+        std::unique_ptr<float[]> vertex_position(new float[m_control_point_count * 3]);
+        std::unique_ptr<float[]> vertex_radius(new float[m_control_point_count * 1]);
 
         for (uint i = 0; i < vertices.size(); i++) {
             InputFloat* position_ptr = vertex_positions_radius.get() + i * 4;
@@ -242,17 +249,28 @@ public:
 
             dr::store(position_ptr, vertices[i]);
             dr::store(radius_ptr, radius[i]);
+
+            // OptiX
+            position_ptr = vertex_position.get() + i * 3;
+            radius_ptr = vertex_radius.get() + i;
+            dr::store(position_ptr, vertices[i]);
+            dr::store(radius_ptr, radius[i]);
         }
 
-        for (uint i = 0; i < vertices.size() - 3; i++) {
-            ScalarIndex* index_ptr = indices.get() + i;
+        for (uint i = 0; i < m_segment_count; i++) {
+            u_int32_t* index_ptr = indices.get() + i;
             dr::store(index_ptr, i);
         }
 
         m_vertex_with_radius = dr::load<FloatStorage>(vertex_positions_radius.get(), m_control_point_count * 4);
-        m_indices = dr::load<DynamicBuffer<ScalarIndex>>(indices.get(), m_control_point_count - 3);
+        // m_indices = dr::load<DynamicBuffer<ScalarIndex>>(indices.get(), m_segment_count);
+        m_indices = dr::load<UInt32Storage>(indices.get(), m_segment_count);
 
-        size_t vertex_data_bytes = 4 * sizeof(InputFloat);
+        // OptiX
+        m_vertex = dr::load<FloatStorage>(vertex_position.get(), m_control_point_count * 3);
+        m_radius = dr::load<FloatStorage>(vertex_radius.get(), m_control_point_count * 1);
+
+        size_t vertex_data_bytes = 8 * sizeof(InputFloat);
         Log(Debug, "\"%s\": read %i control points (%s in %s)",
             m_name, m_control_point_count,
             util::mem_string(m_control_point_count * vertex_data_bytes),
@@ -337,7 +355,7 @@ public:
                                    m_control_point_count);
         rtcSetSharedGeometryBuffer(geom, RTC_BUFFER_TYPE_INDEX, 0, RTC_FORMAT_UINT,
                                    m_indices.data(), 0, 1 * sizeof(ScalarIndex),
-                                   m_control_point_count - 3);
+                                   m_segment_count);
         rtcCommitGeometry(geom);
         return geom;
     }
@@ -345,11 +363,43 @@ public:
 
 
 #if defined(MI_ENABLE_CUDA)
-    // TODO: OptiX support for B-spline
+    void optix_prepare_geometry() { }
+
+    void optix_build_input(OptixBuildInput &build_input) const override {
+        void* m_vertex_buffer_ptr = (void*) m_vertex.data(); // triggers dr::eval()
+        void* m_radius_buffer_ptr = (void*) m_radius.data(); // triggers dr::eval()
+        void* m_index_buffer_ptr = (void*) m_indices.data(); // triggers dr::eval()
+
+        build_input.type = OPTIX_BUILD_INPUT_TYPE_CURVES;
+        build_input.curveArray.curveType = OPTIX_PRIMITIVE_TYPE_ROUND_CUBIC_BSPLINE;
+        build_input.curveArray.numPrimitives        = m_segment_count;
+
+        build_input.curveArray.vertexBuffers        = (CUdeviceptr*) &m_vertex_buffer_ptr;
+        build_input.curveArray.numVertices          = m_control_point_count;
+        // build_input.curveArray.vertexStrideInBytes  = 0;
+        build_input.curveArray.vertexStrideInBytes  = sizeof( InputFloat ) * 3;
+
+        build_input.curveArray.widthBuffers         = (CUdeviceptr*) &m_radius_buffer_ptr;
+        // build_input.curveArray.widthStrideInBytes   = 0;
+        build_input.curveArray.widthStrideInBytes   = sizeof( InputFloat );
+
+        build_input.curveArray.indexBuffer          = (CUdeviceptr) m_index_buffer_ptr;
+        // build_input.curveArray.indexStrideInBytes   = 0;
+        build_input.curveArray.indexStrideInBytes   = sizeof( ScalarIndex );
+
+        build_input.curveArray.normalBuffers        = 0;
+        build_input.curveArray.normalStrideInBytes  = 0;
+        build_input.curveArray.flag                 = OPTIX_GEOMETRY_FLAG_NONE;
+        build_input.curveArray.primitiveIndexOffset = 0;
+        build_input.curveArray.endcapFlags          = OptixCurveEndcapFlags::OPTIX_CURVE_ENDCAP_DEFAULT;
+
+        Log(Debug, "Optix_build_input done for one BSpline curve, numVertices %d, numPrimitives %d",
+                    m_control_point_count, m_segment_count);
+    }
 #endif
 
+
     ScalarBoundingBox3f bbox() const override {
-//        NotImplementedError("bbox");
         return m_bbox;
     }
 
@@ -367,8 +417,15 @@ private:
     ScalarBoundingBox3f m_bbox;
 
     ScalarSize m_control_point_count = 0;
+    ScalarSize m_segment_count = 0;
+
     mutable FloatStorage m_vertex_with_radius;
-    mutable DynamicBuffer<ScalarIndex> m_indices;
+    // mutable DynamicBuffer<ScalarIndex> m_indices;
+    mutable UInt32Storage m_indices;
+
+    // separate storage of control points and per-vertex radius for OptiX
+    mutable FloatStorage m_vertex;
+    mutable FloatStorage m_radius;
 };
 
 MI_IMPLEMENT_CLASS_VARIANT(BSpline, Shape)
