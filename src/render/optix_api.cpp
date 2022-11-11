@@ -27,6 +27,8 @@ void optix_initialize() {
     L(optixProgramGroupCreate);
     L(optixProgramGroupDestroy)
     L(optixSbtRecordPackHeader);
+    L(optixBuiltinISModuleGet);
+
 
     #undef L
 }

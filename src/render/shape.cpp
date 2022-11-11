@@ -85,6 +85,10 @@ MI_VARIANT bool Shape<Float, Spectrum>::is_mesh() const {
     return class_()->derives_from(Mesh<Float, Spectrum>::m_class);
 }
 
+MI_VARIANT bool Shape<Float, Spectrum>::is_curve() const {
+    return false;
+}
+
 MI_VARIANT typename Shape<Float, Spectrum>::PositionSample3f
 Shape<Float, Spectrum>::sample_position(Float /*time*/, const Point2f & /*sample*/,
                                         Mask /*active*/) const {

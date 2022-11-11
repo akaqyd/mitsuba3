@@ -263,7 +263,6 @@ public:
         }
 
         m_vertex_with_radius = dr::load<FloatStorage>(vertex_positions_radius.get(), m_control_point_count * 4);
-        // m_indices = dr::load<DynamicBuffer<ScalarIndex>>(indices.get(), m_segment_count);
         m_indices = dr::load<UInt32Storage>(indices.get(), m_segment_count);
 
         // OptiX
@@ -285,6 +284,9 @@ public:
         // TODO
     }
 
+    bool is_curve() const override {
+        return true;
+    }
 
     // =============================================================
     //! @{ \name Ray tracing routines
@@ -363,12 +365,12 @@ public:
 
 
 #if defined(MI_ENABLE_CUDA)
-    void optix_prepare_geometry() { }
+    void optix_prepare_geometry() override { }
 
     void optix_build_input(OptixBuildInput &build_input) const override {
-        void* m_vertex_buffer_ptr = (void*) m_vertex.data(); // triggers dr::eval()
-        void* m_radius_buffer_ptr = (void*) m_radius.data(); // triggers dr::eval()
-        void* m_index_buffer_ptr = (void*) m_indices.data(); // triggers dr::eval()
+        m_vertex_buffer_ptr = (void*) m_vertex.data(); // triggers dr::eval()
+        m_radius_buffer_ptr = (void*) m_radius.data(); // triggers dr::eval()
+        m_index_buffer_ptr = (void*) m_indices.data(); // triggers dr::eval()
 
         build_input.type = OPTIX_BUILD_INPUT_TYPE_CURVES;
         build_input.curveArray.curveType = OPTIX_PRIMITIVE_TYPE_ROUND_CUBIC_BSPLINE;
@@ -376,22 +378,19 @@ public:
 
         build_input.curveArray.vertexBuffers        = (CUdeviceptr*) &m_vertex_buffer_ptr;
         build_input.curveArray.numVertices          = m_control_point_count;
-        // build_input.curveArray.vertexStrideInBytes  = 0;
         build_input.curveArray.vertexStrideInBytes  = sizeof( InputFloat ) * 3;
 
         build_input.curveArray.widthBuffers         = (CUdeviceptr*) &m_radius_buffer_ptr;
-        // build_input.curveArray.widthStrideInBytes   = 0;
         build_input.curveArray.widthStrideInBytes   = sizeof( InputFloat );
 
         build_input.curveArray.indexBuffer          = (CUdeviceptr) m_index_buffer_ptr;
-        // build_input.curveArray.indexStrideInBytes   = 0;
         build_input.curveArray.indexStrideInBytes   = sizeof( ScalarIndex );
 
         build_input.curveArray.normalBuffers        = 0;
         build_input.curveArray.normalStrideInBytes  = 0;
         build_input.curveArray.flag                 = OPTIX_GEOMETRY_FLAG_NONE;
         build_input.curveArray.primitiveIndexOffset = 0;
-        build_input.curveArray.endcapFlags          = OptixCurveEndcapFlags::OPTIX_CURVE_ENDCAP_DEFAULT;
+        build_input.curveArray.endcapFlags          = OptixCurveEndcapFlags::OPTIX_CURVE_ENDCAP_ON;
 
         Log(Debug, "Optix_build_input done for one BSpline curve, numVertices %d, numPrimitives %d",
                     m_control_point_count, m_segment_count);
@@ -426,6 +425,11 @@ private:
     // separate storage of control points and per-vertex radius for OptiX
     mutable FloatStorage m_vertex;
     mutable FloatStorage m_radius;
+
+    // for OptiX build input
+    mutable void* m_vertex_buffer_ptr = nullptr;
+    mutable void* m_radius_buffer_ptr = nullptr;
+    mutable void* m_index_buffer_ptr = nullptr;
 };
 
 MI_IMPLEMENT_CLASS_VARIANT(BSpline, Shape)

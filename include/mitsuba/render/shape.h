@@ -377,6 +377,9 @@ public:
     /// Is this shape a triangle mesh?
     bool is_mesh() const;
 
+    /// Is this shape a curve ?
+    virtual bool is_curve() const;
+
     /// Is this shape a shapegroup?
     bool is_shapegroup() const { return class_()->name() == "ShapeGroupPlugin"; };
 

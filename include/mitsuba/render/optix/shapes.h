@@ -9,6 +9,7 @@
 #include "rectangle.cuh"
 #include "sphere.cuh"
 #include "bspline.cuh"
+#include "linearcurve.cuh"
 #else
 
 #include <drjit-core/optix.h>
@@ -21,7 +22,7 @@
 NAMESPACE_BEGIN(mitsuba)
 /// List of the custom shapes supported by OptiX
 static std::string CUSTOM_OPTIX_SHAPE_NAMES[] = {
-    "Disk", "Rectangle", "Sphere", "Cylinder", "BSpline",
+    "Disk", "Rectangle", "Sphere", "Cylinder", "BSpline", "LinearCurve"
 };
 static constexpr size_t CUSTOM_OPTIX_SHAPE_COUNT = std::size(CUSTOM_OPTIX_SHAPE_NAMES);
 
@@ -45,11 +46,13 @@ struct OptixAccelData {
         uint32_t count = 0u;
     };
     HandleData meshes;
+    HandleData curves;
     HandleData others;
 
     ~OptixAccelData() {
         if (meshes.buffer) jit_free(meshes.buffer);
         if (others.buffer) jit_free(others.buffer);
+        if (curves.buffer) jit_free(curves.buffer);
     }
 };
 
@@ -79,10 +82,12 @@ void build_gas(const OptixDeviceContext &context,
                OptixAccelData& out_accel) {
 
     // Separate meshes and custom shapes
-    std::vector<ref<Shape>> shape_meshes, shape_others;
+    std::vector<ref<Shape>> shape_meshes, shape_curves, shape_others;
     for (auto shape: shapes) {
         if (shape->is_mesh())
             shape_meshes.push_back(shape);
+        else if (shape->is_curve())
+            shape_curves.push_back(shape);
         else if (!shape->is_instance())
             shape_others.push_back(shape);
     }
@@ -93,7 +98,7 @@ void build_gas(const OptixDeviceContext &context,
 
         OptixAccelBuildOptions accel_options = {};
         accel_options.buildFlags = OPTIX_BUILD_FLAG_ALLOW_COMPACTION |
-                                   OPTIX_BUILD_FLAG_PREFER_FAST_TRACE |
+                                //    OPTIX_BUILD_FLAG_PREFER_FAST_TRACE |
                                    OPTIX_BUILD_FLAG_ALLOW_RANDOM_VERTEX_ACCESS;     // for curves
 
         accel_options.operation  = OPTIX_BUILD_OPERATION_BUILD;
@@ -106,6 +111,10 @@ void build_gas(const OptixDeviceContext &context,
         }
 
         size_t shapes_count = shape_subset.size();
+
+        for (size_t i = 0; i < shapes_count; i++)
+            Log(Debug, "Build_single_gas for shape %s", shape_subset[i]->class_()->name());
+
 
         if (shapes_count == 0)
             return;
@@ -148,31 +157,33 @@ void build_gas(const OptixDeviceContext &context,
             (CUdeviceptr)output_buffer,
             buffer_sizes.outputSizeInBytes,
             &accel,
-            &emit_property,  // emitted property list
-            1                // num emitted properties
+            nullptr,  // emitted property list
+            0                 // num emitted properties
+            // &emit_property,  // emitted property list
+            // 1                // num emitted properties
         ));
 
         jit_free(d_temp_buffer);
 
-        size_t compact_size;
-        jit_memcpy(JitBackend::CUDA,
-                   &compact_size,
-                   (void*)emit_property.result,
-                   sizeof(size_t));
-        if (compact_size < buffer_sizes.outputSizeInBytes) {
-            void* compact_buffer = jit_malloc(AllocType::Device, compact_size);
-            // Use handle as input and output
-            jit_optix_check(optixAccelCompact(
-                context,
-                (CUstream) jit_cuda_stream(),
-                accel,
-                (CUdeviceptr) compact_buffer,
-                compact_size,
-                &accel
-            ));
-            jit_free(output_buffer);
-            output_buffer = compact_buffer;
-        }
+        // size_t compact_size;
+        // jit_memcpy(JitBackend::CUDA,
+        //            &compact_size,
+        //            (void*)emit_property.result,
+        //            sizeof(size_t));
+        // if (compact_size < buffer_sizes.outputSizeInBytes) {
+        //     void* compact_buffer = jit_malloc(AllocType::Device, compact_size);
+        //     // Use handle as input and output
+        //     jit_optix_check(optixAccelCompact(
+        //         context,
+        //         (CUstream) jit_cuda_stream(),
+        //         accel,
+        //         (CUdeviceptr) compact_buffer,
+        //         compact_size,
+        //         &accel
+        //     ));
+        //     jit_free(output_buffer);
+        //     output_buffer = compact_buffer;
+        // }
 
         handle.handle = accel;
         handle.buffer = output_buffer;
@@ -180,6 +191,7 @@ void build_gas(const OptixDeviceContext &context,
     };
 
     build_single_gas(shape_meshes, out_accel.meshes);
+    build_single_gas(shape_curves, out_accel.curves);
     build_single_gas(shape_others, out_accel.others);
 }
 
@@ -225,6 +237,16 @@ void prepare_ias(const OptixDeviceContext &context,
             flags, accel.others.handle, /* pads = */ { 0, 0 }
         };
         out_instances.push_back(others_instance);
+    }
+
+    // // Create an OptixInstance for the curve shapes if necessary
+    if (accel.curves.handle) {
+        OptixInstance curves_instance = {
+            { T[0], T[1], T[2], T[3], T[4], T[5], T[6], T[7], T[8], T[9], T[10], T[11] },
+            instance_id, sbt_offset, /* visibilityMask = */ 255,
+            flags, accel.curves.handle, /* pads = */ { 0, 0 }
+        };
+        out_instances.push_back(curves_instance);
     }
 
     // Apply the same process to every shape instances

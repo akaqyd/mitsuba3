@@ -351,6 +351,26 @@ D(optixSbtRecordPackHeader, OptixProgramGroup, void *);
 D(optixAccelCompact, OptixDeviceContext, CUstream, OptixTraversableHandle,
   CUdeviceptr, size_t, OptixTraversableHandle *);
 
+// for OptiX curve
+/// Specifies the options for retrieving an intersection program for a built-in primitive type.
+/// The primitive type must not be OPTIX_PRIMITIVE_TYPE_CUSTOM.
+///
+/// \see #optixBuiltinISModuleGet()
+typedef struct OptixBuiltinISOptions
+{
+    OptixPrimitiveType        builtinISModuleType;
+    /// Boolean value indicating whether vertex motion blur is used (but not motion transform blur).
+    int                       usesMotionBlur;
+    /// Build flags, see OptixBuildFlags.
+    unsigned int              buildFlags;
+    /// End cap properties of curves, see OptixCurveEndcapFlags, 0 for non-curve types.
+    unsigned int              curveEndcapFlags;
+} OptixBuiltinISOptions;
+
+D(optixBuiltinISModuleGet, OptixDeviceContext,
+  const OptixModuleCompileOptions *, const OptixPipelineCompileOptions *,
+  const OptixBuiltinISOptions *, OptixModule *);
+
 #undef D
 
 NAMESPACE_BEGIN(mitsuba)
