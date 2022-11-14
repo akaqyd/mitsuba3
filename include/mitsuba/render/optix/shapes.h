@@ -98,7 +98,7 @@ void build_gas(const OptixDeviceContext &context,
 
         OptixAccelBuildOptions accel_options = {};
         accel_options.buildFlags = OPTIX_BUILD_FLAG_ALLOW_COMPACTION |
-                                //    OPTIX_BUILD_FLAG_PREFER_FAST_TRACE |
+                                   OPTIX_BUILD_FLAG_PREFER_FAST_TRACE |
                                    OPTIX_BUILD_FLAG_ALLOW_RANDOM_VERTEX_ACCESS;     // for curves
 
         accel_options.operation  = OPTIX_BUILD_OPERATION_BUILD;

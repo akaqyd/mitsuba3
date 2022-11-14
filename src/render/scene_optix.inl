@@ -212,14 +212,14 @@ size_t init_optix_config(bool has_meshes, bool has_others, bool has_instances, b
                 config.context, &module_compile_options, &config.pipeline_compile_options,
                 &builtinISOptionsBSpline, &config.cubicCurveModule));
 
-            OptixBuiltinISOptions builtinISOptionsLinear = {};
-            builtinISOptionsLinear.builtinISModuleType = OPTIX_PRIMITIVE_TYPE_ROUND_LINEAR;
-            builtinISOptionsLinear.usesMotionBlur = false;
-            builtinISOptionsLinear.curveEndcapFlags = 0;
-            builtinISOptionsLinear.buildFlags= 0;
-            jit_optix_check(optixBuiltinISModuleGet(
-                config.context, &module_compile_options, &config.pipeline_compile_options,
-                &builtinISOptionsLinear, &config.linearCurveModule));
+            // OptixBuiltinISOptions builtinISOptionsLinear = {};
+            // builtinISOptionsLinear.builtinISModuleType = OPTIX_PRIMITIVE_TYPE_ROUND_LINEAR;
+            // builtinISOptionsLinear.usesMotionBlur = false;
+            // builtinISOptionsLinear.curveEndcapFlags = 0;
+            // builtinISOptionsLinear.buildFlags= 0;
+            // jit_optix_check(optixBuiltinISModuleGet(
+            //     config.context, &module_compile_options, &config.pipeline_compile_options,
+            //     &builtinISOptionsLinear, &config.linearCurveModule));
             
         }
 
@@ -237,10 +237,10 @@ size_t init_optix_config(bool has_meshes, bool has_others, bool has_instances, b
                 pgd[2+i].hitgroup.moduleIS            = config.cubicCurveModule;
                 pgd[2+i].hitgroup.entryFunctionNameIS = nullptr;
             } else if (name == "linearcurve") {
-                pgd[2+i].hitgroup.moduleCH            = config.module;
-                pgd[2+i].hitgroup.entryFunctionNameCH = config.custom_shapes_program_names[2*i];
-                pgd[2+i].hitgroup.moduleIS            = config.linearCurveModule;
-                pgd[2+i].hitgroup.entryFunctionNameIS = nullptr;
+                // pgd[2+i].hitgroup.moduleCH            = config.module;
+                // pgd[2+i].hitgroup.entryFunctionNameCH = config.custom_shapes_program_names[2*i];
+                // pgd[2+i].hitgroup.moduleIS            = config.linearCurveModule;
+                // pgd[2+i].hitgroup.entryFunctionNameIS = nullptr;
             } else {
                 pgd[2+i].hitgroup.moduleCH            = config.module;
                 pgd[2+i].hitgroup.entryFunctionNameCH = config.custom_shapes_program_names[2*i];
