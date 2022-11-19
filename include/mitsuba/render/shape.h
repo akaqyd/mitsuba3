@@ -380,6 +380,12 @@ public:
     /// Is this shape a curve ?
     virtual bool is_curve() const;
 
+    /// Is this shape a curve ?
+    virtual bool is_bspline_curve() const;
+
+    /// Is this shape a curve ?
+    virtual bool is_linear_curve() const;
+
     /// Is this shape a shapegroup?
     bool is_shapegroup() const { return class_()->name() == "ShapeGroupPlugin"; };
 

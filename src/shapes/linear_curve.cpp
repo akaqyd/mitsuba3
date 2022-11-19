@@ -287,6 +287,10 @@ public:
         return true;
     }
 
+    bool is_linear_curve() const override {
+        return true;
+    }
+
     // =============================================================
     //! @{ \name Ray tracing routines
     // =============================================================

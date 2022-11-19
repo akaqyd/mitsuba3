@@ -288,6 +288,10 @@ public:
         return true;
     }
 
+    bool is_bspline_curve() const override {
+        return true;
+    }
+
     // =============================================================
     //! @{ \name Ray tracing routines
     // =============================================================

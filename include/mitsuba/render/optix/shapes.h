@@ -46,13 +46,15 @@ struct OptixAccelData {
         uint32_t count = 0u;
     };
     HandleData meshes;
-    HandleData curves;
+    HandleData bspline_curves;
+    HandleData linear_curves;
     HandleData others;
 
     ~OptixAccelData() {
         if (meshes.buffer) jit_free(meshes.buffer);
+        if (bspline_curves.buffer) jit_free(bspline_curves.buffer);
+        if (linear_curves.buffer) jit_free(linear_curves.buffer);
         if (others.buffer) jit_free(others.buffer);
-        if (curves.buffer) jit_free(curves.buffer);
     }
 };
 
@@ -61,11 +63,26 @@ template <typename Shape>
 void fill_hitgroup_records(std::vector<ref<Shape>> &shapes,
                            std::vector<HitGroupSbtRecord> &out_hitgroup_records,
                            const OptixProgramGroup *program_groups) {
-    for (size_t i = 0; i < 2; i++) {
+    for (size_t i = 0; i < 4; i++) {
         for (Shape* shape: shapes) {
-            // This trick allows meshes to be processed first
-            if (i == !shape->is_mesh())
-                shape->optix_fill_hitgroup_records(out_hitgroup_records, program_groups);
+            switch (i) {
+            case 0:
+                if (shape->is_mesh())
+                    shape->optix_fill_hitgroup_records(out_hitgroup_records, program_groups);
+                break;
+            case 1:
+                if (shape->is_bspline_curve())
+                    shape->optix_fill_hitgroup_records(out_hitgroup_records, program_groups);
+                break;
+            case 2:
+                if (shape->is_linear_curve())
+                    shape->optix_fill_hitgroup_records(out_hitgroup_records, program_groups);
+                break;
+            case 3:
+                if (!shape->is_mesh() && !shape->is_curve())
+                    shape->optix_fill_hitgroup_records(out_hitgroup_records, program_groups);
+                break;
+            }
         }
     }
 }
@@ -82,12 +99,14 @@ void build_gas(const OptixDeviceContext &context,
                OptixAccelData& out_accel) {
 
     // Separate meshes and custom shapes
-    std::vector<ref<Shape>> shape_meshes, shape_curves, shape_others;
+    std::vector<ref<Shape>> shape_meshes, shape_bspline_curves, shape_linear_curves, shape_others;
     for (auto shape: shapes) {
         if (shape->is_mesh())
             shape_meshes.push_back(shape);
-        else if (shape->is_curve())
-            shape_curves.push_back(shape);
+        else if (shape->is_bspline_curve())
+            shape_bspline_curves.push_back(shape);
+        else if (shape->is_linear_curve())
+            shape_linear_curves.push_back(shape);
         else if (!shape->is_instance())
             shape_others.push_back(shape);
     }
@@ -191,7 +210,8 @@ void build_gas(const OptixDeviceContext &context,
     };
 
     build_single_gas(shape_meshes, out_accel.meshes);
-    build_single_gas(shape_curves, out_accel.curves);
+    build_single_gas(shape_bspline_curves, out_accel.bspline_curves);
+    build_single_gas(shape_linear_curves, out_accel.linear_curves);
     build_single_gas(shape_others, out_accel.others);
 }
 
@@ -229,6 +249,28 @@ void prepare_ias(const OptixDeviceContext &context,
         sbt_offset += (unsigned int) accel.meshes.count;
     }
 
+    // Create an OptixInstance for the bspline curve shapes if necessary
+    if (accel.bspline_curves.handle) {
+        OptixInstance bspline_curves_instance = {
+            { T[0], T[1], T[2], T[3], T[4], T[5], T[6], T[7], T[8], T[9], T[10], T[11] },
+            instance_id, sbt_offset, /* visibilityMask = */ 255,
+            flags, accel.bspline_curves.handle, /* pads = */ { 0, 0 }
+        };
+        sbt_offset += (unsigned int) accel.bspline_curves.count;
+        out_instances.push_back(bspline_curves_instance);
+    }
+
+    // Create an OptixInstance for the linear curve shapes if necessary
+    if (accel.linear_curves.handle) {
+        OptixInstance linear_curves_instance = {
+            { T[0], T[1], T[2], T[3], T[4], T[5], T[6], T[7], T[8], T[9], T[10], T[11] },
+            instance_id, sbt_offset, /* visibilityMask = */ 255,
+            flags, accel.linear_curves.handle, /* pads = */ { 0, 0 }
+        };
+        sbt_offset += (unsigned int) accel.linear_curves.count;
+        out_instances.push_back(linear_curves_instance);
+    }
+
     // Create an OptixInstance for the custom shapes if necessary
     if (accel.others.handle) {
         OptixInstance others_instance = {
@@ -237,16 +279,6 @@ void prepare_ias(const OptixDeviceContext &context,
             flags, accel.others.handle, /* pads = */ { 0, 0 }
         };
         out_instances.push_back(others_instance);
-    }
-
-    // // Create an OptixInstance for the curve shapes if necessary
-    if (accel.curves.handle) {
-        OptixInstance curves_instance = {
-            { T[0], T[1], T[2], T[3], T[4], T[5], T[6], T[7], T[8], T[9], T[10], T[11] },
-            instance_id, sbt_offset, /* visibilityMask = */ 255,
-            flags, accel.curves.handle, /* pads = */ { 0, 0 }
-        };
-        out_instances.push_back(curves_instance);
     }
 
     // Apply the same process to every shape instances
