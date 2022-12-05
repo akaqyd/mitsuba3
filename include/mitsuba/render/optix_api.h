@@ -51,6 +51,7 @@ using OptixTask              = void*;
 #define OPTIX_COMPILE_OPTIMIZATION_LEVEL_0       0x2340
 #define OPTIX_COMPILE_DEBUG_LEVEL_NONE           0x2350
 #define OPTIX_COMPILE_DEBUG_LEVEL_MINIMAL        0x2351
+#define OPTIX_COMPILE_DEBUG_LEVEL_FULL           0x2352
 
 // for curves
 #define OPTIX_BUILD_FLAG_ALLOW_RANDOM_VERTEX_ACCESS 1u << 4
