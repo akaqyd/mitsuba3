@@ -152,6 +152,9 @@ struct SurfaceInteraction : Interaction<Float_, Spectrum_> {
     /// Incident direction in the local shading frame
     Vector3f wi;
 
+    /// Curve intersection: center of the cross section
+    Point3f cc;
+
     /// Primitive index, e.g. the triangle ID (if applicable)
     Index prim_index;
 
@@ -185,7 +188,7 @@ struct SurfaceInteraction : Interaction<Float_, Spectrum_> {
                                 const Wavelength &wavelengths)
         : Base(0.f, ps.time, wavelengths, ps.p, ps.n), uv(ps.uv),
           sh_frame(Frame3f(ps.n)), dp_du(0), dp_dv(0), dn_du(0), dn_dv(0),
-          duv_dx(0), duv_dy(0), wi(0), prim_index(0), boundary_test(0) {}
+          duv_dx(0), duv_dy(0), wi(0), cc(0), prim_index(0), boundary_test(0) {}
 
     /// Initialize local shading frame using Gram-schmidt orthogonalization
     void initialize_sh_frame() {
@@ -401,7 +404,7 @@ struct SurfaceInteraction : Interaction<Float_, Spectrum_> {
 
     DRJIT_STRUCT(SurfaceInteraction, t, time, wavelengths, p, n, shape, uv,
                  sh_frame, dp_du, dp_dv, dn_du, dn_dv, duv_dx,
-                 duv_dy, wi, prim_index, instance, boundary_test)
+                 duv_dy, wi, cc, prim_index, instance, boundary_test)
 };
 
 // -----------------------------------------------------------------------------

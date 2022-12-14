@@ -283,6 +283,7 @@ public:
 
         // Vector3f normal = si.p - pos;
 
+        si.cc = pos;  // Used by hair shading model
         si.sh_frame.n = dr::normalize(normal);
         si.n = si.sh_frame.n;
 
