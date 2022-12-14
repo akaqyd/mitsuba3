@@ -585,6 +585,9 @@ struct PreliminaryIntersection {
     /// Stores a pointer to the parent instance (if applicable)
     ShapePtr instance = nullptr;
 
+    /// Non-normalized geometric normal of the surface. Used for curves with Embree
+    Vector3f normal;
+
     //! @}
     // =============================================================
 

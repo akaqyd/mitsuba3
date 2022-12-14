@@ -29,31 +29,35 @@
 
     <!-- Shapes -->
 
-    <!-- <shape type="bspline" id="curve-1">
+    <shape type="bspline" id="curve-1">
         <string name="filename" value="data_samples/bspline_sample_1.txt"/>
-    </shape>  -->
+    </shape> 
 
-    <!-- <shape type="bspline" id="curve-2">
+    <shape type="bspline" id="curve-2">
         <string name="filename" value="data_samples/bspline_sample_2.txt"/>
-    </shape> -->
+    </shape>
 
     <shape type="linearcurve" id="curve-3">
         <string name="filename" value="data_samples/linear_sample_1.txt"/>
     </shape>
 
-    <shape type="sphere" id="mirrorsphere">
+    <shape type="linearcurve" id="curve-4">
+        <string name="filename" value="data_samples/linear_sample_2.txt"/>
+    </shape>
+
+    <!-- <shape type="sphere" id="mirrorsphere">
         <transform name="to_world">
             <scale value="0.5"/>
             <translate x="0" y="0" z="0"/>
         </transform>
-    </shape>
+    </shape> -->
 
-    <!-- <shape type="disk" id="sampledisk">
+    <shape type="disk" id="sampledisk">
         <transform name="to_world">
             <scale value="0.2"/>
             <translate x="1" y="0" z="0"/>
         </transform>
-    </shape> -->
+    </shape>
 
 
 </scene>

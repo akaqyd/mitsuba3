@@ -571,6 +571,9 @@ Scene<Float, Spectrum>::ray_intersect_preliminary_gpu(const Ray3f &ray,
         pi.shape[!active]    = nullptr;
         pi.instance[!active] = nullptr;
 
+        // pi.normal can only be set when using Embree
+        pi.normal = 0;
+
         return pi;
     } else {
         DRJIT_MARK_USED(ray);

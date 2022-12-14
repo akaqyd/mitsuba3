@@ -239,6 +239,9 @@ Scene<Float, Spectrum>::ray_intersect_preliminary_cpu(const Ray3f &ray,
             pi.t = rh.ray.tfar;
             pi.prim_index = prim_index;
             pi.prim_uv = Point2f(rh.hit.u, rh.hit.v);
+
+            // Store the surface normal for curves
+            pi.normal = Vector3f{rh.hit.Ng_x, rh.hit.Ng_y, rh.hit.Ng_z};
         }
 
         return pi;

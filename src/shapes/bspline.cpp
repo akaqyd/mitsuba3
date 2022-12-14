@@ -11,6 +11,8 @@
 #include <mitsuba/render/interaction.h>
 #include <mitsuba/render/shape.h>
 
+#include <drjit/texture.h>
+
 #if defined(MI_ENABLE_EMBREE)
 #include <embree3/rtcore.h>
 #endif
@@ -20,91 +22,6 @@
 #endif
 
 NAMESPACE_BEGIN(mitsuba)
-
-/**!
-
-.. _shape-bspline:
-
-BSpline(:monosp:`bspline`)
--------------------------------------------------
-
-.. pluginparameters::
-
- * - file_path
-   - |string|
-   - The path to the file that contains all the control points for the B-spline
-
- * - to_world
-   - |transform|
-   -  Specifies an optional linear object-to-world transformation.
-      Note that non-uniform scales and shears are not permitted!
-      (Default: none, i.e. object space = world space)
-
-.. subfigstart::
-.. subfigure:: ../../resources/data/docs/images/render/shape_sphere_basic.jpg
-   :caption: Basic example
-.. subfigure:: ../../resources/data/docs/images/render/shape_sphere_parameterization.jpg
-   :caption: A textured sphere with the default parameterization
-.. subfigend::
-   :label: fig-sphere
-
-This shape plugin describes a simple sphere intersection primitive. It should
-always be preferred over sphere approximations modeled using triangles.
-
-A sphere can either be configured using a linear :monosp:`to_world` transformation or the :monosp:`center` and :monosp:`radius` parameters (or both).
-The two declarations below are equivalent.
-
-.. tabs::
-    .. code-tab:: xml
-        :name: sphere
-
-        <shape type="sphere">
-            <transform name="to_world">
-                <scale value="2"/>
-                <translate x="1" y="0" z="0"/>
-            </transform>
-            <bsdf type="diffuse"/>
-        </shape>
-
-        <shape type="sphere">
-            <point name="center" x="1" y="0" z="0"/>
-            <float name="radius" value="2"/>
-            <bsdf type="diffuse"/>
-        </shape>
-
-    .. code-tab:: python
-
-        'sphere_1': {
-            'type': 'sphere',
-            'to_world': mi.ScalarTransform4f.scale([2, 2, 2]).translate([1, 0, 0]),
-            'bsdf': {
-                'type': 'diffuse'
-            }
-        },
-
-        'sphere_2': {
-            'type': 'sphere',
-            'center': [1, 0, 0],
-            'radius': 2,
-            'bsdf': {
-                'type': 'diffuse'
-            }
-        }
-
-When a :ref:`sphere <shape-sphere>` shape is turned into an :ref:`area <emitter-area>`
-light source, Mitsuba 3 switches to an efficient
-`sampling strategy <https://www.akalin.com/sampling-visible-sphere>`_ by Fred Akalin that
-has particularly low variance.
-This makes it a good default choice for lighting new scenes.
-
-.. subfigstart::
-.. subfigure:: ../../resources/data/docs/images/render/shape_sphere_light_mesh.jpg
-   :caption: Spherical area light modeled using triangles
-.. subfigure:: ../../resources/data/docs/images/render/shape_sphere_light_analytic.jpg
-   :caption: Spherical area light modeled using the :ref:`sphere <shape-sphere>` plugin
-.. subfigend::
-   :label: fig-sphere-light
- */
 
 template <bool Negate, size_t N>
 void advance(const char **start_, const char *end, const char (&delim)[N]) {
@@ -141,6 +58,7 @@ public:
     using FloatStorage = DynamicBuffer<dr::replace_scalar_t<Float, InputFloat>>;
 
     using UInt32Storage = DynamicBuffer<UInt32>;
+    using Index = typename CoreAliases::UInt32;
 
 
     BSpline(const Properties &props) : Base(props) {
@@ -165,7 +83,7 @@ public:
         // temporary buffer for vertices and per-vertex radius
         std::vector<InputVector3f> vertices;
         std::vector<InputFloat> radius;
-        size_t vertex_guess = mmap->size() / 100;
+        ScalarSize vertex_guess = mmap->size() / 100;
         vertices.reserve(vertex_guess);
 
         // load data from the given .txt file
@@ -180,7 +98,7 @@ public:
             advance<false>(&next, eof, "\n");
 
             // Copy buf into a 0-terminated buffer
-            size_t size = next - ptr;
+            ScalarSize size = next - ptr;
             if (size >= sizeof(buf) - 1)
                 fail("file contains an excessively long line! (%i characters)", size);
             memcpy(buf, ptr, size);
@@ -195,7 +113,7 @@ public:
             // Vertex position
             InputPoint3f p;
             InputFloat r;
-            for (size_t i = 0; i < 3; ++i) {
+            for (ScalarSize i = 0; i < 3; ++i) {
                 const char *orig = cur;
                 p[i] = string::strtof<InputFloat>(cur, (char **) &cur);
                 parse_error |= cur == orig;
@@ -229,9 +147,7 @@ public:
         m_segment_count = m_control_point_count - 3;
         if (unlikely(m_control_point_count < 4))
             fail("bspline must have at least four control points");
-
-
-        for (int i = 0; i < m_control_point_count; i++)
+        for (ScalarIndex i = 0; i < m_control_point_count; i++)
             Log(Debug, "Loaded a control point %s with radius %f",
                 vertices[i], radius[i]);
 
@@ -243,7 +159,7 @@ public:
         std::unique_ptr<float[]> vertex_position(new float[m_control_point_count * 3]);
         std::unique_ptr<float[]> vertex_radius(new float[m_control_point_count * 1]);
 
-        for (uint i = 0; i < vertices.size(); i++) {
+        for (ScalarIndex i = 0; i < vertices.size(); i++) {
             InputFloat* position_ptr = vertex_positions_radius.get() + i * 4;
             InputFloat* radius_ptr   = vertex_positions_radius.get() + i * 4 + 3;
 
@@ -257,7 +173,7 @@ public:
             dr::store(radius_ptr, radius[i]);
         }
 
-        for (uint i = 0; i < m_segment_count; i++) {
+        for (ScalarIndex i = 0; i < m_segment_count; i++) {
             u_int32_t* index_ptr = indices.get() + i;
             dr::store(index_ptr, i);
         }
@@ -269,12 +185,18 @@ public:
         m_vertex = dr::load<FloatStorage>(vertex_position.get(), m_control_point_count * 3);
         m_radius = dr::load<FloatStorage>(vertex_radius.get(), m_control_point_count * 1);
 
-        size_t vertex_data_bytes = 8 * sizeof(InputFloat);
+        ScalarSize vertex_data_bytes = 8 * sizeof(InputFloat);
         Log(Debug, "\"%s\": read %i control points (%s in %s)",
             m_name, m_control_point_count,
             util::mem_string(m_control_point_count * vertex_data_bytes),
             util::time_string((float) timer.value())
         );
+
+        size_t m_shape[1] = { m_control_point_count };
+        m_tex = dr::Texture<Float, 1>{m_shape, 3};
+        m_tex.set_value(m_vertex);
+        m_tex_r = dr::Texture<Float, 1>{m_shape, 1};
+        m_tex_r.set_value(m_radius);
 
         update();
         initialize();
@@ -299,14 +221,14 @@ public:
     template <typename FloatP, typename Ray3fP>
     std::tuple<FloatP, Point<FloatP, 2>, dr::uint32_array_t<FloatP>,
                dr::uint32_array_t<FloatP>>
-    ray_intersect_preliminary_impl(const Ray3fP &ray,
-                                   dr::mask_t<FloatP> active) const {
+    ray_intersect_preliminary_impl(const Ray3fP &,
+                                   dr::mask_t<FloatP>) const {
         NotImplementedError("ray_intersect_preliminary_impl");
     }
 
     template <typename FloatP, typename Ray3fP>
-    dr::mask_t<FloatP> ray_test_impl(const Ray3fP &ray,
-                                     dr::mask_t<FloatP> active) const {
+    dr::mask_t<FloatP> ray_test_impl(const Ray3fP &,
+                                     dr::mask_t<FloatP>) const {
         NotImplementedError("ray_test_impl");
     }
 
@@ -314,17 +236,76 @@ public:
 
     SurfaceInteraction3f compute_surface_interaction(const Ray3f &ray,
                                                      const PreliminaryIntersection3f &pi,
-                                                     uint32_t ray_flags,
+                                                     uint32_t /*ray_flags*/,
                                                      uint32_t recursion_depth,
                                                      Mask active) const override {
-        // TODO
+        MI_MASK_ARGUMENT(active);
+
+        // Early exit when tracing isn't necessary
+        if (!m_is_instance && recursion_depth > 0)
+            return dr::zeros<SurfaceInteraction3f>();
+
+        Float t = pi.t;
+
         SurfaceInteraction3f si = dr::zeros<SurfaceInteraction3f>();
+        si.t = dr::select(active, t, dr::Infinity<Float>);
+        si.p = ray(t);
+
+        Float u_local = dr::clamp(pi.prim_uv.x(), 0.000001f, 0.999999f);
+        Index idx = pi.prim_index;
+
+        // Convert segment-local u to curve-global u
+        Float u_global = (u_local + idx + 1.5f) / m_control_point_count;
+
+        // Use Mitsuba's Texture to interpolate the point position that lies on the curve center and the radius
+        Point3f pos, r;
+        m_tex.eval_cubic(u_global, pos.data(), true, true);
+        m_tex_r.eval_cubic(u_global, r.data(), true, true);
+
+        // Compute normal when radius != 0
+        Point4f q0 = dr::gather<Point4f>(m_vertex_with_radius, idx + 0);
+        Point4f q1 = dr::gather<Point4f>(m_vertex_with_radius, idx + 1);
+        Point4f q2 = dr::gather<Point4f>(m_vertex_with_radius, idx + 2);
+        Point4f q3 = dr::gather<Point4f>(m_vertex_with_radius, idx + 3);
+        // Point4f p0 = (q2 + q0) / 6.f + q1 * 4.f / 6.f;
+        Point4f p1 = q2 - q0;
+        Point4f p2 = q2 - q1;
+        Point4f p3 = q3 - q1;
+        Float v = 1.f - u_local;
+
+        Vector4f d4 = 0.5f * v * v * p1 + 2 * v * u_local * p2 + 0.5f * u_local * u_local * p3;
+        Vector3f d(d4.x(), d4.y(), d4.z());
+        Float dr = d4.w();
+        Float dd = dr::dot(d, d);
+
+        Vector3f o1 = si.p - pos;
+        Vector3f normal = dd * o1 - (dr * r.x()) * d;
+
+        // Vector3f normal = si.p - pos;
+
+        si.sh_frame.n = dr::normalize(normal);
+        si.n = si.sh_frame.n;
+
+        si.shape    = this;
+        si.instance = nullptr;
+
         return si;
     }
+
     //! @}
     // =============================================================
 
+    void traverse(TraversalCallback *callback) override {
+        callback->put_parameter("control_point_count", m_control_point_count, +ParamFlags::NonDifferentiable);
+        callback->put_parameter("vertex",              m_vertex, +ParamFlags::NonDifferentiable);
+        callback->put_parameter("radius",              m_radius, +ParamFlags::NonDifferentiable);
+        Base::traverse(callback);
+    }
 
+    void parameters_changed(const std::vector<std::string> &/*keys*/) override {
+        // TODO
+        Base::parameters_changed();
+    }
 
     // =============================================================
     //! @{ \name Sampling routines
@@ -332,19 +313,19 @@ public:
 
     // Sampling routines are not implemented for B-spline curves
 
-    PositionSample3f sample_position(Float time, const Point2f &sample,
-                                     Mask active) const override {
+    PositionSample3f sample_position(Float, const Point2f &,
+                                     Mask) const override {
         NotImplementedError("sample_position");
     }
-    Float pdf_position(const PositionSample3f & /*ps*/, Mask active) const override {
+    Float pdf_position(const PositionSample3f & /*ps*/, Mask) const override {
         NotImplementedError("pdf_position");
     }
-    DirectionSample3f sample_direction(const Interaction3f &it, const Point2f &sample,
-                                       Mask active) const override {
+    DirectionSample3f sample_direction(const Interaction3f &, const Point2f &,
+                                       Mask) const override {
         NotImplementedError("sample_direction");
     }
-    Float pdf_direction(const Interaction3f &it, const DirectionSample3f &ds,
-                        Mask active) const override {
+    Float pdf_direction(const Interaction3f &, const DirectionSample3f &,
+                        Mask) const override {
         NotImplementedError("pdf_direction");
     }
     //! @}
@@ -422,8 +403,8 @@ private:
     ScalarSize m_control_point_count = 0;
     ScalarSize m_segment_count = 0;
 
+    // storage for Embree
     mutable FloatStorage m_vertex_with_radius;
-    // mutable DynamicBuffer<ScalarIndex> m_indices;
     mutable UInt32Storage m_indices;
 
     // separate storage of control points and per-vertex radius for OptiX
@@ -431,9 +412,14 @@ private:
     mutable FloatStorage m_radius;
 
     // for OptiX build input
+    // TODO: add if cuda...
     mutable void* m_vertex_buffer_ptr = nullptr;
     mutable void* m_radius_buffer_ptr = nullptr;
     mutable void* m_index_buffer_ptr = nullptr;
+
+    // texture used to compute surface normal
+    dr::Texture<Float, 1> m_tex;
+    dr::Texture<Float, 1> m_tex_r;
 };
 
 MI_IMPLEMENT_CLASS_VARIANT(BSpline, Shape)

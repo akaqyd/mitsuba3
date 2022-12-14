@@ -11,6 +11,8 @@
 #include <mitsuba/render/interaction.h>
 #include <mitsuba/render/shape.h>
 
+#include <drjit/texture.h>
+
 #if defined(MI_ENABLE_EMBREE)
 #include <embree3/rtcore.h>
 #endif
@@ -20,91 +22,6 @@
 #endif
 
 NAMESPACE_BEGIN(mitsuba)
-
-/**!
-
-.. _shape-bspline:
-
-BSpline(:monosp:`bspline`)
--------------------------------------------------
-
-.. pluginparameters::
-
- * - file_path
-   - |string|
-   - The path to the file that contains all the control points for the B-spline
-
- * - to_world
-   - |transform|
-   -  Specifies an optional linear object-to-world transformation.
-      Note that non-uniform scales and shears are not permitted!
-      (Default: none, i.e. object space = world space)
-
-.. subfigstart::
-.. subfigure:: ../../resources/data/docs/images/render/shape_sphere_basic.jpg
-   :caption: Basic example
-.. subfigure:: ../../resources/data/docs/images/render/shape_sphere_parameterization.jpg
-   :caption: A textured sphere with the default parameterization
-.. subfigend::
-   :label: fig-sphere
-
-This shape plugin describes a simple sphere intersection primitive. It should
-always be preferred over sphere approximations modeled using triangles.
-
-A sphere can either be configured using a linear :monosp:`to_world` transformation or the :monosp:`center` and :monosp:`radius` parameters (or both).
-The two declarations below are equivalent.
-
-.. tabs::
-    .. code-tab:: xml
-        :name: sphere
-
-        <shape type="sphere">
-            <transform name="to_world">
-                <scale value="2"/>
-                <translate x="1" y="0" z="0"/>
-            </transform>
-            <bsdf type="diffuse"/>
-        </shape>
-
-        <shape type="sphere">
-            <point name="center" x="1" y="0" z="0"/>
-            <float name="radius" value="2"/>
-            <bsdf type="diffuse"/>
-        </shape>
-
-    .. code-tab:: python
-
-        'sphere_1': {
-            'type': 'sphere',
-            'to_world': mi.ScalarTransform4f.scale([2, 2, 2]).translate([1, 0, 0]),
-            'bsdf': {
-                'type': 'diffuse'
-            }
-        },
-
-        'sphere_2': {
-            'type': 'sphere',
-            'center': [1, 0, 0],
-            'radius': 2,
-            'bsdf': {
-                'type': 'diffuse'
-            }
-        }
-
-When a :ref:`sphere <shape-sphere>` shape is turned into an :ref:`area <emitter-area>`
-light source, Mitsuba 3 switches to an efficient
-`sampling strategy <https://www.akalin.com/sampling-visible-sphere>`_ by Fred Akalin that
-has particularly low variance.
-This makes it a good default choice for lighting new scenes.
-
-.. subfigstart::
-.. subfigure:: ../../resources/data/docs/images/render/shape_sphere_light_mesh.jpg
-   :caption: Spherical area light modeled using triangles
-.. subfigure:: ../../resources/data/docs/images/render/shape_sphere_light_analytic.jpg
-   :caption: Spherical area light modeled using the :ref:`sphere <shape-sphere>` plugin
-.. subfigend::
-   :label: fig-sphere-light
- */
 
 template <bool Negate, size_t N>
 void advance(const char **start_, const char *end, const char (&delim)[N]) {
@@ -139,6 +56,7 @@ public:
     using InputVector3f = Vector<InputFloat, 3>;
     using FloatStorage = DynamicBuffer<dr::replace_scalar_t<Float, InputFloat>>;
     using UInt32Storage = DynamicBuffer<UInt32>;
+    using Index = typename CoreAliases::UInt32;
 
     LinearCurve(const Properties &props) : Base(props) {
 
@@ -275,6 +193,12 @@ public:
             util::time_string((float) timer.value())
         );
 
+        size_t m_shape[1] = { m_control_point_count };
+        m_tex = dr::Texture<Float, 1>{m_shape, 3};
+        m_tex.set_value(m_vertex);
+        m_tex_r = dr::Texture<Float, 1>{m_shape, 1};
+        m_tex_r.set_value(m_radius);
+
         update();
         initialize();
     }
@@ -316,10 +240,60 @@ public:
                                                      uint32_t ray_flags,
                                                      uint32_t recursion_depth,
                                                      Mask active) const override {
-        // TODO
+        MI_MASK_ARGUMENT(active);
+
+        // Early exit when tracing isn't necessary
+        if (!m_is_instance && recursion_depth > 0)
+            return dr::zeros<SurfaceInteraction3f>();
+
+        Float t = pi.t;
+        
         SurfaceInteraction3f si = dr::zeros<SurfaceInteraction3f>();
+        si.t = dr::select(active, t, dr::Infinity<Float>);
+        si.p = ray(t);
+
+        Float u_local = pi.prim_uv.x();
+        Index idx = pi.prim_index;
+
+        // Convert segment-local u to curve-global u
+        Float u_global = (u_local + idx + 0.5) / (m_control_point_count);
+
+        // Use Mitsuba's Texture to interpolate the point position that lies on the curve center and the radius
+        Point3f pos;
+        m_tex.eval(u_global, pos.data(), true);
+        Point3f r;
+        m_tex_r.eval(u_global, r.data(), true);
+
+        // si.sh_frame.n = dr::normalize(pi.normal);
+        si.sh_frame.n = dr::normalize(si.p - pos);
+
+        // Compute normal when radius' != 0
+        // Point4f q0 = dr::gather<Point4f>(m_vertex_with_radius, idx + 0);
+        // Point4f q1 = dr::gather<Point4f>(m_vertex_with_radius, idx + 1);
+
+        // Vector4f d4 = q1 - q0;
+        // Vector3f d(d4.x(), d4.y(), d4.z());
+        // Float dr = d4.w();
+        // Float dd = dr::dot(d, d);
+
+        // Vector3f o1 = si.p - pos;
+        // Vector3f normal = dd * o1 - (dr * r.x()) * d;
+        // si.sh_frame.n = dr::normalize(normal);
+
+
+        si.n = si.sh_frame.n;
+    
+        si.uv = Point2f(u_global, dr::norm(si.n - dr::normalize(pi.normal)));
+
+        si.shape    = this;
+        si.instance = nullptr;
+
+        if (unlikely(has_flag(ray_flags, RayFlags::BoundaryTest)))
+            si.boundary_test = dr::abs(dr::dot(si.sh_frame.n, -ray.d));
+
         return si;
     }
+
     //! @}
     // =============================================================
 
@@ -432,7 +406,9 @@ private:
     mutable void* m_radius_buffer_ptr = nullptr;
     mutable void* m_index_buffer_ptr = nullptr;
 
-
+    // texture used to compute surface normal
+    dr::Texture<Float, 1> m_tex;
+    dr::Texture<Float, 1> m_tex_r;
 };
 
 MI_IMPLEMENT_CLASS_VARIANT(LinearCurve, Shape)
