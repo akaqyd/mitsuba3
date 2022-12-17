@@ -23,24 +23,6 @@
 
 NAMESPACE_BEGIN(mitsuba)
 
-template <bool Negate, size_t N>
-void advance(const char **start_, const char *end, const char (&delim)[N]) {
-    const char *start = *start_;
-
-    while (true) {
-        bool is_delim = false;
-        for (size_t i = 0; i < N; ++i)
-            if (*start == delim[i])
-                is_delim = true;
-        if ((is_delim ^ Negate) || start == end)
-            break;
-        ++start;
-    }
-
-    *start_ = start;
-}
-
-
 template <typename Float, typename Spectrum>
 class LinearCurve final : public Shape<Float, Spectrum> {
 public:
@@ -80,7 +62,7 @@ public:
         // temporary buggers for vertices and per-vertex radius
         std::vector<InputVector3f> vertices;
         std::vector<InputFloat> radius;
-        size_t vertex_guess = mmap->size() / 100;
+        ScalarSize vertex_guess = mmap->size() / 100;
         vertices.reserve(vertex_guess);
 
         // load data from the given .txt file
@@ -95,7 +77,7 @@ public:
             advance<false>(&next, eof, "\n");
 
             // Copy buf into a 0-terminated buffer
-            size_t size = next - ptr;
+            ScalarSize size = next - ptr;
             if (size >= sizeof(buf) - 1)
                 fail("file contains an excessively long line! (%i characters)", size);
             memcpy(buf, ptr, size);
@@ -110,7 +92,7 @@ public:
             // Vertex position
             InputPoint3f p;
             InputFloat r;
-            for (size_t i = 0; i < 3; ++i) {
+            for (ScalarSize i = 0; i < 3; ++i) {
                 const char *orig = cur;
                 p[i] = string::strtof<InputFloat>(cur, (char **) &cur);
                 parse_error |= cur == orig;
@@ -159,7 +141,7 @@ public:
         std::unique_ptr<float[]> vertex_radius(new float[m_control_point_count * 1]);
 
 
-        for (uint i = 0; i < vertices.size(); i++) {
+        for (ScalarIndex i = 0; i < vertices.size(); i++) {
             InputFloat* position_ptr = vertex_positions_radius.get() + i * 4;
             InputFloat* radius_ptr   = vertex_positions_radius.get() + i * 4 + 3;
 
@@ -173,7 +155,7 @@ public:
             dr::store(radius_ptr, radius[i]);
         }
 
-        for (uint i = 0; i < m_segment_count; i++) {
+        for (ScalarIndex i = 0; i < m_segment_count; i++) {
             u_int32_t* index_ptr = indices.get() + i;
             dr::store(index_ptr, i);
         }
@@ -186,7 +168,7 @@ public:
         m_radius = dr::load<FloatStorage>(vertex_radius.get(), m_control_point_count * 1);
 
 
-        size_t vertex_data_bytes = 4 * sizeof(InputFloat);
+        ScalarSize vertex_data_bytes = 4 * sizeof(InputFloat);
         Log(Debug, "\"%s\": read %i control points (%s in %s)",
             m_name, m_control_point_count,
             util::mem_string(m_control_point_count * vertex_data_bytes),
@@ -203,41 +185,26 @@ public:
         initialize();
     }
 
-    void update() {
-        // TODO
+    template <bool Negate, ScalarSize N>
+    void advance(const char **start_, const char *end, const char (&delim)[N]) {
+        const char *start = *start_;
+
+        while (true) {
+            bool is_delim = false;
+            for (ScalarSize i = 0; i < N; ++i)
+                if (*start == delim[i])
+                    is_delim = true;
+            if ((is_delim ^ Negate) || start == end)
+                break;
+            ++start;
+        }
+
+        *start_ = start;
     }
-
-    bool is_curve() const override {
-        return true;
-    }
-
-    bool is_linear_curve() const override {
-        return true;
-    }
-
-    // =============================================================
-    //! @{ \name Ray tracing routines
-    // =============================================================
-
-    template <typename FloatP, typename Ray3fP>
-    std::tuple<FloatP, Point<FloatP, 2>, dr::uint32_array_t<FloatP>,
-               dr::uint32_array_t<FloatP>>
-    ray_intersect_preliminary_impl(const Ray3fP &ray,
-                                   dr::mask_t<FloatP> active) const {
-        NotImplementedError("ray_intersect_preliminary_impl");
-    }
-
-    template <typename FloatP, typename Ray3fP>
-    dr::mask_t<FloatP> ray_test_impl(const Ray3fP &ray,
-                                     dr::mask_t<FloatP> active) const {
-        NotImplementedError("ray_test_impl");
-    }
-
-    MI_SHAPE_DEFINE_RAY_INTERSECT_METHODS()
 
     SurfaceInteraction3f compute_surface_interaction(const Ray3f &ray,
                                                      const PreliminaryIntersection3f &pi,
-                                                     uint32_t ray_flags,
+                                                     uint32_t /* ray_flags */,
                                                      uint32_t recursion_depth,
                                                      Mask active) const override {
         MI_MASK_ARGUMENT(active);
@@ -288,41 +255,22 @@ public:
         si.shape    = this;
         si.instance = nullptr;
 
-        if (unlikely(has_flag(ray_flags, RayFlags::BoundaryTest)))
-            si.boundary_test = dr::abs(dr::dot(si.sh_frame.n, -ray.d));
-
         return si;
     }
 
-    //! @}
-    // =============================================================
 
-
-
-    // =============================================================
-    //! @{ \name Sampling routines
-    // =============================================================
-
-    // Sampling routines are not implemented for B-spline curves
-
-    PositionSample3f sample_position(Float time, const Point2f &sample,
-                                     Mask active) const override {
-        NotImplementedError("sample_position");
+    void traverse(TraversalCallback *callback) override {
+        callback->put_parameter("control_point_count", m_control_point_count, +ParamFlags::NonDifferentiable);
+        callback->put_parameter("vertex",              m_vertex, +ParamFlags::NonDifferentiable);
+        callback->put_parameter("radius",              m_radius, +ParamFlags::NonDifferentiable);
+        Base::traverse(callback);
     }
-    Float pdf_position(const PositionSample3f & /*ps*/, Mask active) const override {
-        NotImplementedError("pdf_position");
-    }
-    DirectionSample3f sample_direction(const Interaction3f &it, const Point2f &sample,
-                                       Mask active) const override {
-        NotImplementedError("sample_direction");
-    }
-    Float pdf_direction(const Interaction3f &it, const DirectionSample3f &ds,
-                        Mask active) const override {
-        NotImplementedError("pdf_direction");
-    }
-    //! @}
-    // =============================================================
 
+
+    void parameters_changed(const std::vector<std::string> &/*keys*/) override {
+        // TODO
+        Base::parameters_changed();
+    }
 
 
 #if defined(MI_ENABLE_EMBREE)
@@ -373,10 +321,23 @@ public:
                     m_control_point_count, m_segment_count);
     }
 #endif
+
+    void update() {
+        // TODO
+    }
+
+    bool is_curve() const override {
+        return true;
+    }
+
+    bool is_linear_curve() const override {
+        return true;
+    }
+
     ScalarBoundingBox3f bbox() const override {
-//        NotImplementedError("bbox");
         return m_bbox;
     }
+
 
     std::string to_string() const override {
         std::ostringstream oss;

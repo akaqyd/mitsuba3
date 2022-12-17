@@ -13,6 +13,8 @@
 
 #include <drjit/texture.h>
 
+// #include "bspline.h"
+
 #if defined(MI_ENABLE_EMBREE)
 #include <embree3/rtcore.h>
 #endif
@@ -22,24 +24,6 @@
 #endif
 
 NAMESPACE_BEGIN(mitsuba)
-
-template <bool Negate, size_t N>
-void advance(const char **start_, const char *end, const char (&delim)[N]) {
-    const char *start = *start_;
-
-    while (true) {
-        bool is_delim = false;
-        for (size_t i = 0; i < N; ++i)
-            if (*start == delim[i])
-                is_delim = true;
-        if ((is_delim ^ Negate) || start == end)
-            break;
-        ++start;
-    }
-
-    *start_ = start;
-}
-
 
 template <typename Float, typename Spectrum>
 class BSpline final : public Shape<Float, Spectrum> {
@@ -202,37 +186,88 @@ public:
         initialize();
     }
 
-    void update() {
-        // TODO
+    BSpline(const Properties &props, std::vector<InputVector3f> &vertices, std::vector<InputFloat> &radius) : Base(props) {
+
+        // used for throwing an error later
+        auto fail = [&](const char *descr, auto... args) {
+            Throw(("Error while loading bspline curve file \"%s\": " + std::string(descr))
+                      .c_str(), args...);
+        };            
+
+        m_control_point_count = vertices.size();
+        m_segment_count = m_control_point_count - 3;
+
+        if (unlikely(m_control_point_count < 4))
+            fail("bspline must have at least four control points");
+
+        if (unlikely(radius.size() != 1 && radius.size() != vertices.size()))
+            fail("radius.size() is neither 1 nor vertices.size()");
+        
+        if (radius.size() == 1) {
+            radius.resize(vertices.size(), radius.front());
+        }
+
+        // store the data from the previous temporary buffer
+        std::unique_ptr<float[]> vertex_positions_radius(new float[m_control_point_count * 4]);
+        std::unique_ptr<ScalarIndex[]> indices(new ScalarIndex[m_segment_count]);
+
+        // for OptiX
+        std::unique_ptr<float[]> vertex_position(new float[m_control_point_count * 3]);
+        std::unique_ptr<float[]> vertex_radius(new float[m_control_point_count * 1]);
+
+        for (ScalarIndex i = 0; i < vertices.size(); i++) {
+            InputFloat* position_ptr = vertex_positions_radius.get() + i * 4;
+            InputFloat* radius_ptr   = vertex_positions_radius.get() + i * 4 + 3;
+
+            dr::store(position_ptr, vertices[i]);
+            dr::store(radius_ptr, radius[i]);
+
+            // OptiX
+            position_ptr = vertex_position.get() + i * 3;
+            radius_ptr = vertex_radius.get() + i;
+            dr::store(position_ptr, vertices[i]);
+            dr::store(radius_ptr, radius[i]);
+        }
+
+        for (ScalarIndex i = 0; i < m_segment_count; i++) {
+            u_int32_t* index_ptr = indices.get() + i;
+            dr::store(index_ptr, i);
+        }
+
+        m_vertex_with_radius = dr::load<FloatStorage>(vertex_positions_radius.get(), m_control_point_count * 4);
+        m_indices = dr::load<UInt32Storage>(indices.get(), m_segment_count);
+
+        // OptiX
+        m_vertex = dr::load<FloatStorage>(vertex_position.get(), m_control_point_count * 3);
+        m_radius = dr::load<FloatStorage>(vertex_radius.get(), m_control_point_count * 1);
+
+        size_t m_shape[1] = { m_control_point_count };
+        m_tex = dr::Texture<Float, 1>{m_shape, 3};
+        m_tex.set_value(m_vertex);
+        m_tex_r = dr::Texture<Float, 1>{m_shape, 1};
+        m_tex_r.set_value(m_radius);
+
+        update();
+        initialize();
     }
 
-    bool is_curve() const override {
-        return true;
+    template <bool Negate, size_t N>
+    void advance(const char **start_, const char *end, const char (&delim)[N]) {
+        const char *start = *start_;
+
+        while (true) {
+            bool is_delim = false;
+            for (size_t i = 0; i < N; ++i)
+                if (*start == delim[i])
+                    is_delim = true;
+            if ((is_delim ^ Negate) || start == end)
+                break;
+            ++start;
+        }
+
+        *start_ = start;
     }
 
-    bool is_bspline_curve() const override {
-        return true;
-    }
-
-    // =============================================================
-    //! @{ \name Ray tracing routines
-    // =============================================================
-
-    template <typename FloatP, typename Ray3fP>
-    std::tuple<FloatP, Point<FloatP, 2>, dr::uint32_array_t<FloatP>,
-               dr::uint32_array_t<FloatP>>
-    ray_intersect_preliminary_impl(const Ray3fP &,
-                                   dr::mask_t<FloatP>) const {
-        NotImplementedError("ray_intersect_preliminary_impl");
-    }
-
-    template <typename FloatP, typename Ray3fP>
-    dr::mask_t<FloatP> ray_test_impl(const Ray3fP &,
-                                     dr::mask_t<FloatP>) const {
-        NotImplementedError("ray_test_impl");
-    }
-
-    MI_SHAPE_DEFINE_RAY_INTERSECT_METHODS()
 
     SurfaceInteraction3f compute_surface_interaction(const Ray3f &ray,
                                                      const PreliminaryIntersection3f &pi,
@@ -293,9 +328,6 @@ public:
         return si;
     }
 
-    //! @}
-    // =============================================================
-
     void traverse(TraversalCallback *callback) override {
         callback->put_parameter("control_point_count", m_control_point_count, +ParamFlags::NonDifferentiable);
         callback->put_parameter("vertex",              m_vertex, +ParamFlags::NonDifferentiable);
@@ -307,31 +339,6 @@ public:
         // TODO
         Base::parameters_changed();
     }
-
-    // =============================================================
-    //! @{ \name Sampling routines
-    // =============================================================
-
-    // Sampling routines are not implemented for B-spline curves
-
-    PositionSample3f sample_position(Float, const Point2f &,
-                                     Mask) const override {
-        NotImplementedError("sample_position");
-    }
-    Float pdf_position(const PositionSample3f & /*ps*/, Mask) const override {
-        NotImplementedError("pdf_position");
-    }
-    DirectionSample3f sample_direction(const Interaction3f &, const Point2f &,
-                                       Mask) const override {
-        NotImplementedError("sample_direction");
-    }
-    Float pdf_direction(const Interaction3f &, const DirectionSample3f &,
-                        Mask) const override {
-        NotImplementedError("pdf_direction");
-    }
-    //! @}
-    // =============================================================
-
 
 
 #if defined(MI_ENABLE_EMBREE)
@@ -383,6 +390,17 @@ public:
     }
 #endif
 
+    void update() {
+        // TODO
+    }
+
+    bool is_curve() const override {
+        return true;
+    }
+
+    bool is_bspline_curve() const override {
+        return true;
+    }
 
     ScalarBoundingBox3f bbox() const override {
         return m_bbox;
