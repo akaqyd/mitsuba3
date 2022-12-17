@@ -259,9 +259,8 @@ public:
         Float u_global = (u_local + idx + 0.5) / (m_control_point_count);
 
         // Use Mitsuba's Texture to interpolate the point position that lies on the curve center and the radius
-        Point3f pos;
+        Point3f pos, r;
         m_tex.eval(u_global, pos.data(), true);
-        Point3f r;
         m_tex_r.eval(u_global, r.data(), true);
 
         // si.sh_frame.n = dr::normalize(pi.normal);
@@ -280,10 +279,11 @@ public:
         // Vector3f normal = dd * o1 - (dr * r.x()) * d;
         // si.sh_frame.n = dr::normalize(normal);
 
-
         si.n = si.sh_frame.n;
     
         si.uv = Point2f(u_global, dr::norm(si.n - dr::normalize(pi.normal)));
+        si.dp_du = pos;
+        si.dn_du = u_local;
 
         si.shape    = this;
         si.instance = nullptr;

@@ -1,0 +1,64 @@
+<scene version="3.0.0">
+    <default name="spp" value="1"/>
+
+    <integrator type="aov">
+        <string name="aovs" value="dd.y:depth,nn:sh_normal,uu:uv,i:prim_index"/>
+    </integrator>
+
+    <sensor type="perspective" id="sensor">
+        <string name="fov_axis" value="smaller"/>
+        <float name="near_clip" value="0.001"/>
+        <float name="far_clip" value="100.0"/>
+        <float name="focus_distance" value="1000"/>
+        <float name="fov" value="45"/>
+        <transform name="to_world">
+            <lookat origin="0,  0,  -5"
+                    target="0,  0,  0"
+                    up    ="0,  1,  0"/>
+        </transform>
+        <sampler type="independent">
+            <integer name="sample_count" value="$spp"/>
+        </sampler>
+        <film type="hdrfilm">
+            <integer name="width"  value="1024"/>
+            <integer name="height" value="768"/>
+            <rfilter type="tent"/>
+            <string name="pixel_format" value="rgb"/>
+            <string name="component_format" value="float32"/>
+        </film>
+    </sensor>
+
+    <!-- Shapes -->
+
+    <!-- <shape type="bspline" id="curve-1">
+        <string name="filename" value="data_samples/bspline_sample_8cps.txt"/>
+    </shape>  -->
+
+    <!-- <shape type="bspline" id="curve-2">
+        <string name="filename" value="data_samples/bspline_sample_2.txt"/>
+    </shape> -->
+
+    <shape type="linearcurve" id="curve-3">
+        <string name="filename" value="data_samples/linear_sample_2cps.txt"/>
+    </shape>
+
+    <!-- <shape type="linearcurve" id="curve-4">
+        <string name="filename" value="data_samples/linear_sample_2.txt"/>
+    </shape> -->
+
+    <!-- <shape type="sphere" id="mirrorsphere">
+        <transform name="to_world">
+            <scale value="0.5"/>
+            <translate x="-1.5" y="0" z="0"/>
+        </transform>
+    </shape> -->
+
+    <!-- <shape type="disk" id="sampledisk">
+        <transform name="to_world">
+            <scale value="0.2"/>
+            <translate x="1" y="0" z="0"/>
+        </transform>
+    </shape> -->
+
+
+</scene>

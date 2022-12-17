@@ -589,7 +589,7 @@ struct PreliminaryIntersection {
     ShapePtr instance = nullptr;
 
     /// Non-normalized geometric normal of the surface. Used for curves with Embree
-    Vector3f normal;
+    Vector3f normal = 0;
 
     //! @}
     // =============================================================

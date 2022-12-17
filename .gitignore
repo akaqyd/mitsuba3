@@ -6,6 +6,9 @@
 /.vscode
 /.vs
 
+# EXR
+/notebooks/*.exr
+
 # CLion
 /.idea
 
