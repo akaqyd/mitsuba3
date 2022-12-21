@@ -316,11 +316,12 @@ public:
         Vector3f o1 = si.p - pos;
         Vector3f normal = dd * o1 - (dr * r.x()) * d;
 
-        // Vector3f normal = si.p - pos;
-
         si.cc = pos;  // Used by hair shading model
         si.sh_frame.n = dr::normalize(normal);
         si.n = si.sh_frame.n;
+
+        // Compute UV
+        // si.uv = Point2f(u_global, dr::norm(si.n - dr::normalize(pi.normal)));
 
         si.shape    = this;
         si.instance = nullptr;

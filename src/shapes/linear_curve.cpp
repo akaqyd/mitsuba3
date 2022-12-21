@@ -248,9 +248,9 @@ public:
 
         si.n = si.sh_frame.n;
     
-        si.uv = Point2f(u_global, dr::norm(si.n - dr::normalize(pi.normal)));
-        si.dp_du = pos;
-        si.dn_du = u_local;
+        // si.uv = Point2f(u_global, dr::norm(si.n - dr::normalize(pi.normal)));
+        // si.dp_du = pos;
+        // si.dn_du = u_local;
 
         si.shape    = this;
         si.instance = nullptr;
