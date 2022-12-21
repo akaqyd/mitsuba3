@@ -10,6 +10,7 @@
 #include <mitsuba/render/fwd.h>
 #include <mitsuba/render/interaction.h>
 #include <mitsuba/render/shape.h>
+// #include <iostream>
 
 #include <drjit/texture.h>
 
@@ -271,7 +272,7 @@ public:
 
     SurfaceInteraction3f compute_surface_interaction(const Ray3f &ray,
                                                      const PreliminaryIntersection3f &pi,
-                                                     uint32_t /*ray_flags*/,
+                                                     uint32_t ray_flags,
                                                      uint32_t recursion_depth,
                                                      Mask active) const override {
         MI_MASK_ARGUMENT(active);
@@ -286,6 +287,12 @@ public:
         si.t = dr::select(active, t, dr::Infinity<Float>);
         si.p = ray(t);
 
+        // Fields requirement dependencies
+        bool need_dn_duv = has_flag(ray_flags, RayFlags::dNSdUV) ||
+                           has_flag(ray_flags, RayFlags::dNGdUV);
+        bool need_dp_duv = has_flag(ray_flags, RayFlags::dPdUV) || need_dn_duv;
+        bool need_uv     = has_flag(ray_flags, RayFlags::UV) || need_dp_duv;
+
         Float u_local = dr::clamp(pi.prim_uv.x(), 0.000001f, 0.999999f);
         Index idx = pi.prim_index;
 
@@ -297,31 +304,50 @@ public:
         m_tex.eval_cubic(u_global, pos.data(), true, true);
         m_tex_r.eval_cubic(u_global, r.data(), true, true);
 
-        // Compute normal when radius != 0
+        // An efficient way to compute the u-derivative of pos
         Point4f q0 = dr::gather<Point4f>(m_vertex_with_radius, idx + 0);
         Point4f q1 = dr::gather<Point4f>(m_vertex_with_radius, idx + 1);
         Point4f q2 = dr::gather<Point4f>(m_vertex_with_radius, idx + 2);
         Point4f q3 = dr::gather<Point4f>(m_vertex_with_radius, idx + 3);
-        // Point4f p0 = (q2 + q0) / 6.f + q1 * 4.f / 6.f;
         Point4f p1 = q2 - q0;
         Point4f p2 = q2 - q1;
         Point4f p3 = q3 - q1;
-        Float v = 1.f - u_local;
+        Float tmp = 1.f - u_local;
+        Vector4f d4 = 0.5f * tmp * tmp * p1 + 2 * tmp * u_local * p2 + 0.5f * u_local * u_local * p3;
 
-        Vector4f d4 = 0.5f * v * v * p1 + 2 * v * u_local * p2 + 0.5f * u_local * u_local * p3;
-        Vector3f d(d4.x(), d4.y(), d4.z());
-        Float dr = d4.w();
-        Float dd = dr::dot(d, d);
+        Vector3f dc_du(d4.x(), d4.y(), d4.z());
+        Float dc_du_norm = dr::norm(dc_du);
+        Vector3f dc_du_normalized = dc_du / dc_du_norm;
+        Float dr_du = d4.w();
 
-        Vector3f o1 = si.p - pos;
-        Vector3f normal = dd * o1 - (dr * r.x()) * d;
+        Vector3f rad_vec = si.p - pos;
+        Vector3f rad_vec_normalized = dr::normalize(rad_vec);
+        Vector3f normal = dr::normalize(dc_du_norm * rad_vec - (dr_du * r.x()) * dc_du_normalized);
 
         si.cc = pos;  // Used by hair shading model
-        si.sh_frame.n = dr::normalize(normal);
-        si.n = si.sh_frame.n;
+        si.n = si.sh_frame.n = normal;
 
-        // Compute UV
-        // si.uv = Point2f(u_global, dr::norm(si.n - dr::normalize(pi.normal)));
+        if (likely(need_uv)) {
+            // v is defined as the (normalized) angle from the `up` vector.
+            Vector3f up = m_to_world.value().transform_affine(Vector3f(0.f, 1.f, 0.f));
+            Vector3f v_pos = dr::normalize(dr::cross(up, dc_du));
+            Vector3f v_cut = dr::normalize(dr::cross(dc_du, v_pos));
+            si.uv = Point2f(
+                u_global,
+                dr::atan2(dr::dot(v_pos, rad_vec_normalized), dr::dot(v_cut, rad_vec_normalized))
+            );
+            si.uv.y() += dr::select(si.uv.y() < 0.f, dr::TwoPi<Float>, 0.f);
+            si.uv.y() *= dr::InvTwoPi<Float>;
+            // TODO: singular?
+            if (likely(need_dp_duv)) {
+                si.dp_du = dc_du + dr::normalize(rad_vec) * dr_du;
+                si.dp_dv = dr::cross(rad_vec_normalized, dc_du_normalized) * dr::TwoPi<Float> * r.x();
+            }
+        }
+
+        if (need_dn_duv) {
+            si.dn_du = si.dn_dv = Vector3f(0);  // TODO
+        }
 
         si.shape    = this;
         si.instance = nullptr;
