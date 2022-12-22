@@ -177,12 +177,6 @@ public:
             util::time_string((float) timer.value())
         );
 
-        size_t m_shape[1] = { m_control_point_count };
-        m_tex = dr::Texture<Float, 1>{m_shape, 3};
-        m_tex.set_value(m_vertex);
-        m_tex_r = dr::Texture<Float, 1>{m_shape, 1};
-        m_tex_r.set_value(m_radius);
-
         update();
         initialize();
     }
@@ -242,12 +236,6 @@ public:
         m_vertex = dr::load<FloatStorage>(vertex_position.get(), m_control_point_count * 3);
         m_radius = dr::load<FloatStorage>(vertex_radius.get(), m_control_point_count * 1);
 
-        size_t m_shape[1] = { m_control_point_count };
-        m_tex = dr::Texture<Float, 1>{m_shape, 3};
-        m_tex.set_value(m_vertex);
-        m_tex_r = dr::Texture<Float, 1>{m_shape, 1};
-        m_tex_r.set_value(m_radius);
-
         update();
         initialize();
     }
@@ -299,30 +287,36 @@ public:
         // Convert segment-local u to curve-global u
         Float u_global = (u_local + idx + 1.5f) / m_control_point_count;
 
-        // Use Mitsuba's Texture to interpolate the point position that lies on the curve center and the radius
-        Point3f pos, r;
-        m_tex.eval_cubic(u_global, pos.data(), true, true);
-        m_tex_r.eval_cubic(u_global, r.data(), true, true);
+        // Compute posr and the u-derivative of posr
+        Point4f q0 = dr::gather<Point4f>(m_vertex_with_radius, idx + 0),
+                q1 = dr::gather<Point4f>(m_vertex_with_radius, idx + 1),
+                q2 = dr::gather<Point4f>(m_vertex_with_radius, idx + 2),
+                q3 = dr::gather<Point4f>(m_vertex_with_radius, idx + 3);
+        Float u2 = dr::sqr(u_local),
+              u3 = u2 * u_local;
+        Vector4f posr =
+            (-u3 + 3.f * u2 - 3.f * u_local + 1.f) * q0 +
+            (3.f * u3 - 6.f * u2 + 4.f) * q1 +
+            (-3.f * u3 + 3.f * u2 + 3.f * u_local + 1.f) * q2 +
+            u3 * q3;
+        posr *= 1.f / 6.f;
+        Vector4f du_posr =
+            (-3.f * u2 + 6.f * u_local - 3.f) * q0 +
+            (9.f * u2 - 12.f * u_local) * q1 +
+            (-9.f * u2 + 6.f * u_local + 3.f) * q2 +
+            (3.f * u2) * q3;
+        du_posr *= 1.f / 6.f;
 
-        // An efficient way to compute the u-derivative of pos
-        Point4f q0 = dr::gather<Point4f>(m_vertex_with_radius, idx + 0);
-        Point4f q1 = dr::gather<Point4f>(m_vertex_with_radius, idx + 1);
-        Point4f q2 = dr::gather<Point4f>(m_vertex_with_radius, idx + 2);
-        Point4f q3 = dr::gather<Point4f>(m_vertex_with_radius, idx + 3);
-        Point4f p1 = q2 - q0;
-        Point4f p2 = q2 - q1;
-        Point4f p3 = q3 - q1;
-        Float tmp = 1.f - u_local;
-        Vector4f d4 = 0.5f * tmp * tmp * p1 + 2 * tmp * u_local * p2 + 0.5f * u_local * u_local * p3;
+        Vector3f dc_du(du_posr.x(), du_posr.y(), du_posr.z());
+        Point3f pos(posr.x(), posr.y(), posr.z());
 
-        Vector3f dc_du(d4.x(), d4.y(), d4.z());
         Float dc_du_norm = dr::norm(dc_du);
         Vector3f dc_du_normalized = dc_du / dc_du_norm;
-        Float dr_du = d4.w();
+        Float dr_du = du_posr.w();
 
         Vector3f rad_vec = si.p - pos;
         Vector3f rad_vec_normalized = dr::normalize(rad_vec);
-        Vector3f normal = dr::normalize(dc_du_norm * rad_vec - (dr_du * r.x()) * dc_du_normalized);
+        Vector3f normal = dr::normalize(dc_du_norm * rad_vec - (dr_du * posr.w()) * dc_du_normalized);
 
         si.cc = pos;  // Used by hair shading model
         si.n = si.sh_frame.n = normal;
@@ -341,7 +335,7 @@ public:
             // TODO: singular?
             if (likely(need_dp_duv)) {
                 si.dp_du = dc_du + dr::normalize(rad_vec) * dr_du;
-                si.dp_dv = dr::cross(rad_vec_normalized, dc_du_normalized) * dr::TwoPi<Float> * r.x();
+                si.dp_dv = dr::cross(rad_vec_normalized, dc_du_normalized) * dr::TwoPi<Float> * posr.w();
             }
         }
 
@@ -449,7 +443,7 @@ private:
     ScalarSize m_control_point_count = 0;
     ScalarSize m_segment_count = 0;
 
-    // storage for Embree
+    // storage for Embree & mitsuba
     mutable FloatStorage m_vertex_with_radius;
     mutable UInt32Storage m_indices;
 
@@ -462,10 +456,6 @@ private:
     mutable void* m_vertex_buffer_ptr = nullptr;
     mutable void* m_radius_buffer_ptr = nullptr;
     mutable void* m_index_buffer_ptr = nullptr;
-
-    // texture used to compute surface normal
-    dr::Texture<Float, 1> m_tex;
-    dr::Texture<Float, 1> m_tex_r;
 };
 
 MI_IMPLEMENT_CLASS_VARIANT(BSpline, Shape)
