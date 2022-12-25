@@ -175,13 +175,13 @@ public:
             util::time_string((float) timer.value())
         );
 
-        size_t m_shape[1] = { m_control_point_count };
-        m_tex = dr::Texture<Float, 1>{m_shape, 3};
-        m_tex.set_value(m_vertex);
-        m_tex_r = dr::Texture<Float, 1>{m_shape, 1};
-        m_tex_r.set_value(m_radius);
+        // size_t m_shape[1] = { m_control_point_count };
+        // m_tex = dr::Texture<Float, 1>{m_shape, 3};
+        // m_tex.set_value(m_vertex);
+        // m_tex_r = dr::Texture<Float, 1>{m_shape, 1};
+        // m_tex_r.set_value(m_radius);
 
-        update();
+        // update();
         initialize();
     }
 
@@ -222,35 +222,41 @@ public:
         Float u_local = pi.prim_uv.x();
         Index idx = pi.prim_index;
 
-        // Convert segment-local u to curve-global u
-        Float u_global = (u_local + idx + 0.5) / (m_control_point_count);
-
-        // Use Mitsuba's Texture to interpolate the point position that lies on the curve center and the radius
-        Point3f pos, r;
-        m_tex.eval(u_global, pos.data(), true);
-        m_tex_r.eval(u_global, r.data(), true);
-
-        // si.sh_frame.n = dr::normalize(pi.normal);
+        // It seems u_local given by Embree and OptiX has already taken into account the influence of radius
+        // My guess is u_local is shifted a bit so that the normal can be easily computed as si.p - pos, 
+        // where pos = (1 - u_local) * cp1 + u_local * cp2
+        // The shift of u_local is not documented anywhere, but normals computed in this way are consistent with Embree's result
+        Point4f q0 = dr::gather<Point4f>(m_vertex_with_radius, idx + 0),
+                q1 = dr::gather<Point4f>(m_vertex_with_radius, idx + 1);
+        
+        Point3f p0(q0.x(), q0.y(), q0.z()),
+                p1(q1.x(), q1.y(), q1.z());
+        
+        Point3f pos = p0 * (1.f - u_local) + p1 * u_local;
         si.sh_frame.n = dr::normalize(si.p - pos);
 
-        // Compute normal when radius' != 0
+        // Convert segment-local u to curve-global u
+        // Float u_global = (u_local + idx + 0.5) / (m_control_point_count);
+        // Use Mitsuba's Texture to interpolate the point position that lies on the curve center and the radius
+        // Point3f pos, r;
+        // m_tex.eval(u_global, pos.data(), true);
+        // m_tex_r.eval(u_global, r.data(), true);
+        // si.sh_frame.n = dr::normalize(pi.normal);
+        // si.sh_frame.n = dr::normalize(si.p - pos);
         // Point4f q0 = dr::gather<Point4f>(m_vertex_with_radius, idx + 0);
         // Point4f q1 = dr::gather<Point4f>(m_vertex_with_radius, idx + 1);
-
         // Vector4f d4 = q1 - q0;
         // Vector3f d(d4.x(), d4.y(), d4.z());
         // Float dr = d4.w();
         // Float dd = dr::dot(d, d);
-
         // Vector3f o1 = si.p - pos;
         // Vector3f normal = dd * o1 - (dr * r.x()) * d;
         // si.sh_frame.n = dr::normalize(normal);
 
         si.n = si.sh_frame.n;
     
-        // si.uv = Point2f(u_global, dr::norm(si.n - dr::normalize(pi.normal)));
-        // si.dp_du = pos;
-        // si.dn_du = u_local;
+        // Debug
+        si.uv = Point2f(u_local, dr::norm(si.n - dr::normalize(pi.normal)));
 
         si.shape    = this;
         si.instance = nullptr;
@@ -267,8 +273,15 @@ public:
     }
 
 
-    void parameters_changed(const std::vector<std::string> &/*keys*/) override {
-        // TODO
+    void parameters_changed(const std::vector<std::string> &keys) override {
+        if (keys.empty() || string::contains(keys, "vertex") || string::contains(keys, "radius")) {
+            
+            // update m_vertex_with_radius to match new m_vertex and m_radius
+            update();
+
+            mark_dirty();
+        }
+
         Base::parameters_changed();
     }
 
@@ -323,7 +336,17 @@ public:
 #endif
 
     void update() {
-        // TODO
+        for (ScalarIndex i = 0; i < m_control_point_count; i++) {
+            Float x = dr::gather<Float>(m_vertex, i * 3 + 0);
+            Float y = dr::gather<Float>(m_vertex, i * 3 + 1);
+            Float z = dr::gather<Float>(m_vertex, i * 3 + 2);
+            Float r = dr::gather<Float>(m_radius, i);
+
+            dr::scatter(m_vertex_with_radius, x, UInt32(i) * 4 + 0);
+            dr::scatter(m_vertex_with_radius, y, UInt32(i) * 4 + 1);
+            dr::scatter(m_vertex_with_radius, z, UInt32(i) * 4 + 2);
+            dr::scatter(m_vertex_with_radius, r, UInt32(i) * 4 + 3);
+        }
     }
 
     bool is_curve() const override {
@@ -368,8 +391,8 @@ private:
     mutable void* m_index_buffer_ptr = nullptr;
 
     // texture used to compute surface normal
-    dr::Texture<Float, 1> m_tex;
-    dr::Texture<Float, 1> m_tex_r;
+    // dr::Texture<Float, 1> m_tex;
+    // dr::Texture<Float, 1> m_tex_r;
 };
 
 MI_IMPLEMENT_CLASS_VARIANT(LinearCurve, Shape)

@@ -177,66 +177,7 @@ public:
             util::time_string((float) timer.value())
         );
 
-        update();
-        initialize();
-    }
-
-    BSpline(const Properties &props, std::vector<InputVector3f> &vertices, std::vector<InputFloat> &radius) : Base(props) {
-
-        // used for throwing an error later
-        auto fail = [&](const char *descr, auto... args) {
-            Throw(("Error while loading bspline curve file \"%s\": " + std::string(descr))
-                      .c_str(), args...);
-        };            
-
-        m_control_point_count = vertices.size();
-        m_segment_count = m_control_point_count - 3;
-
-        if (unlikely(m_control_point_count < 4))
-            fail("bspline must have at least four control points");
-
-        if (unlikely(radius.size() != 1 && radius.size() != vertices.size()))
-            fail("radius.size() is neither 1 nor vertices.size()");
-        
-        if (radius.size() == 1) {
-            radius.resize(vertices.size(), radius.front());
-        }
-
-        // store the data from the previous temporary buffer
-        std::unique_ptr<float[]> vertex_positions_radius(new float[m_control_point_count * 4]);
-        std::unique_ptr<ScalarIndex[]> indices(new ScalarIndex[m_segment_count]);
-
-        // for OptiX
-        std::unique_ptr<float[]> vertex_position(new float[m_control_point_count * 3]);
-        std::unique_ptr<float[]> vertex_radius(new float[m_control_point_count * 1]);
-
-        for (ScalarIndex i = 0; i < vertices.size(); i++) {
-            InputFloat* position_ptr = vertex_positions_radius.get() + i * 4;
-            InputFloat* radius_ptr   = vertex_positions_radius.get() + i * 4 + 3;
-
-            dr::store(position_ptr, vertices[i]);
-            dr::store(radius_ptr, radius[i]);
-
-            // OptiX
-            position_ptr = vertex_position.get() + i * 3;
-            radius_ptr = vertex_radius.get() + i;
-            dr::store(position_ptr, vertices[i]);
-            dr::store(radius_ptr, radius[i]);
-        }
-
-        for (ScalarIndex i = 0; i < m_segment_count; i++) {
-            u_int32_t* index_ptr = indices.get() + i;
-            dr::store(index_ptr, i);
-        }
-
-        m_vertex_with_radius = dr::load<FloatStorage>(vertex_positions_radius.get(), m_control_point_count * 4);
-        m_indices = dr::load<UInt32Storage>(indices.get(), m_segment_count);
-
-        // OptiX
-        m_vertex = dr::load<FloatStorage>(vertex_position.get(), m_control_point_count * 3);
-        m_radius = dr::load<FloatStorage>(vertex_radius.get(), m_control_point_count * 1);
-
-        update();
+        // update();
         initialize();
     }
 
@@ -356,8 +297,15 @@ public:
         Base::traverse(callback);
     }
 
-    void parameters_changed(const std::vector<std::string> &/*keys*/) override {
-        // TODO
+    void parameters_changed(const std::vector<std::string> &keys) override {
+        if (keys.empty() || string::contains(keys, "vertex") || string::contains(keys, "radius")) {
+            
+            // update m_vertex_with_radius to match new m_vertex and m_radius
+            update();
+
+            mark_dirty();
+    }
+
         Base::parameters_changed();
     }
 
@@ -412,7 +360,17 @@ public:
 #endif
 
     void update() {
-        // TODO
+        for (ScalarIndex i = 0; i < m_control_point_count; i++) {
+            Float x = dr::gather<Float>(m_vertex, i * 3 + 0);
+            Float y = dr::gather<Float>(m_vertex, i * 3 + 1);
+            Float z = dr::gather<Float>(m_vertex, i * 3 + 2);
+            Float r = dr::gather<Float>(m_radius, i);
+
+            dr::scatter(m_vertex_with_radius, x, UInt32(i) * 4 + 0);
+            dr::scatter(m_vertex_with_radius, y, UInt32(i) * 4 + 1);
+            dr::scatter(m_vertex_with_radius, z, UInt32(i) * 4 + 2);
+            dr::scatter(m_vertex_with_radius, r, UInt32(i) * 4 + 3);
+        }
     }
 
     bool is_curve() const override {
@@ -452,7 +410,6 @@ private:
     mutable FloatStorage m_radius;
 
     // for OptiX build input
-    // TODO: add if cuda...
     mutable void* m_vertex_buffer_ptr = nullptr;
     mutable void* m_radius_buffer_ptr = nullptr;
     mutable void* m_index_buffer_ptr = nullptr;
