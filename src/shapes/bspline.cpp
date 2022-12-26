@@ -365,6 +365,7 @@ public:
         dr::scatter(m_vertex_with_radius, dr::gather<Float>(m_vertex, idx * 3u + 1u), idx * 4u + 1u);
         dr::scatter(m_vertex_with_radius, dr::gather<Float>(m_vertex, idx * 3u + 2u), idx * 4u + 2u);
         dr::scatter(m_vertex_with_radius, dr::gather<Float>(m_radius, idx), idx * 4u + 3u);
+        dr::eval(m_vertex_with_radius);
     }
 
     bool is_curve() const override {
