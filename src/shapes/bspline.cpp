@@ -360,17 +360,11 @@ public:
 #endif
 
     void update() {
-        for (ScalarIndex i = 0; i < m_control_point_count; i++) {
-            Float x = dr::gather<Float>(m_vertex, i * 3 + 0);
-            Float y = dr::gather<Float>(m_vertex, i * 3 + 1);
-            Float z = dr::gather<Float>(m_vertex, i * 3 + 2);
-            Float r = dr::gather<Float>(m_radius, i);
-
-            dr::scatter(m_vertex_with_radius, x, UInt32(i) * 4 + 0);
-            dr::scatter(m_vertex_with_radius, y, UInt32(i) * 4 + 1);
-            dr::scatter(m_vertex_with_radius, z, UInt32(i) * 4 + 2);
-            dr::scatter(m_vertex_with_radius, r, UInt32(i) * 4 + 3);
-        }
+        UInt32 idx = dr::arange<UInt32>(m_control_point_count);
+        dr::scatter(m_vertex_with_radius, dr::gather<Float>(m_vertex, idx * 3u     ), idx * 4u);
+        dr::scatter(m_vertex_with_radius, dr::gather<Float>(m_vertex, idx * 3u + 1u), idx * 4u + 1u);
+        dr::scatter(m_vertex_with_radius, dr::gather<Float>(m_vertex, idx * 3u + 2u), idx * 4u + 2u);
+        dr::scatter(m_vertex_with_radius, dr::gather<Float>(m_radius, idx), idx * 4u + 3u);
     }
 
     bool is_curve() const override {
@@ -410,9 +404,11 @@ private:
     mutable FloatStorage m_radius;
 
     // for OptiX build input
+#if defined(MI_ENABLE_CUDA)
     mutable void* m_vertex_buffer_ptr = nullptr;
     mutable void* m_radius_buffer_ptr = nullptr;
     mutable void* m_index_buffer_ptr = nullptr;
+#endif
 };
 
 MI_IMPLEMENT_CLASS_VARIANT(BSpline, Shape)
